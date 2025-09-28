@@ -1,0 +1,46 @@
+{
+  "name": "mp-auto-push",
+  "version": "1.0.0",
+  "description": "微信公众号文章自动推送工具 - 获取60s新闻，通过元宝AI生成文章，自动推送到微信公众号草稿箱",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "NODE_ENV=development node src/index.js",
+    "help": "node src/index.js --help",
+    "config": "node src/index.js --config",
+    "daemon": "node src/daemon.js",
+    "daemon:start": "node src/daemon.js start",
+    "daemon:stop": "node src/daemon.js stop",
+    "daemon:restart": "node src/daemon.js restart",
+    "daemon:status": "node src/daemon.js status",
+    "daemon:run": "node src/daemon.js run",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop mp-auto-push",
+    "pm2:restart": "pm2 restart mp-auto-push",
+    "pm2:delete": "pm2 delete mp-auto-push",
+    "pm2:logs": "pm2 logs mp-auto-push",
+    "pm2:status": "pm2 status mp-auto-push",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "wechat",
+    "mp",
+    "auto-push",
+    "news",
+    "ai",
+    "yuanbao"
+  ],
+  "author": "AI Assistant",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "dotenv": "^17.2.2",
+    "form-data": "^4.0.4",
+    "node-cron": "^4.2.1",
+    "pm2": "^6.0.13",
+    "winston": "^3.17.0"
+  }
+}

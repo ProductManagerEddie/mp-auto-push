@@ -1,0 +1,254 @@
+require('dotenv').config();
+
+const NewsService = require('./newsService');
+const AIService = require('./aiService');
+const WeChatService = require('./wechatService');
+const { logger } = require('./logger');
+const fs = require('fs').promises;
+const path = require('path');
+
+/**
+ * 主程序 - 整合所有功能
+ */
+class AutoPushApp {
+    constructor(options = {}) {
+        this.newsService = new NewsService();
+        this.aiService = new AIService();
+        this.wechatService = new WeChatService();
+        this.isServiceMode = options.serviceMode || false;
+        
+        // 配置AI服务
+        if (process.env.YUANBAO_TOKEN && process.env.YUANBAO_USER_ID) {
+            this.aiService.setToken(process.env.YUANBAO_TOKEN);
+            this.aiService.setUserId(process.env.YUANBAO_USER_ID);
+        } else {
+            const message = '错误: 请在.env文件中配置YUANBAO_TOKEN和YUANBAO_USER_ID';
+            if (this.isServiceMode) {
+                logger.error(message);
+                throw new Error(message);
+            } else {
+                console.error(message);
+                process.exit(1);
+            }
+        }
+        
+        // 配置微信服务（可选）
+        if (process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET) {
+            this.wechatService.setConfig(
+                process.env.WECHAT_APP_ID,
+                process.env.WECHAT_APP_SECRET
+            );
+        } else {
+            const message = '警告: 未配置微信公众号信息，文章将保存到本地';
+            if (this.isServiceMode) {
+                logger.warn(message);
+            } else {
+                console.warn(message);
+            }
+        }
+    }
+
+    /**
+     * 执行完整的推送流程
+     */
+    async run() {
+        try {
+            const logInfo = this.isServiceMode ? logger.info.bind(logger) : console.log;
+            // 移除未使用的 logError 声明
+            
+            logInfo('=== 微信公众号自动推送开始 ===');
+            logInfo('时间:', new Date().toLocaleString());
+            
+            // 步骤1: 获取最新新闻
+            logInfo('\n步骤1: 获取最新新闻');
+            const newsData = await this.newsService.getLatestNews();
+            const formattedNews = this.newsService.formatNewsForAI(newsData);
+            
+            // 步骤2: 生成文章
+            logInfo('\n步骤2: 调用AI生成文章');
+            const article = await this.aiService.generateArticle(formattedNews);
+            
+            // 步骤3: 解析文章
+            logInfo('\n步骤3: 解析文章内容');
+            const { title, content } = this.wechatService.parseArticle(article);
+            logInfo('文章标题:', title);
+            logInfo('文章长度:', content.length, '字符');
+            
+            // 步骤4: 推送到微信公众号草稿箱
+            logInfo('\n步骤4: 推送到微信公众号');
+            const articleData = {
+                title: title,
+                content: content,
+                author: '喵酱',
+                digest: `${newsData.date} 今日新闻速览`,
+                imageUrl: newsData.image || newsData.cover,
+                sourceUrl: newsData.link
+            };
+            
+            // 检查微信配置
+            if (!process.env.WECHAT_APP_ID || !process.env.WECHAT_APP_SECRET) {
+                logInfo('⚠️  微信公众号配置未设置，跳过推送步骤');
+                logInfo('请在.env文件中设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET');
+                
+                // 保存文章到本地文件
+                await this.saveArticleToFile(articleData, newsData.date);
+            } else {
+                const mediaId = await this.wechatService.createDraft(articleData);
+                logInfo('✅ 文章已成功推送到微信公众号草稿箱');
+                logInfo('草稿ID:', mediaId);
+            }
+            
+            logInfo('\n=== 推送流程完成 ===');
+            return {
+                success: true,
+                newsData,
+                article: articleData,
+                timestamp: new Date().toISOString()
+            };
+            
+        } catch (error) {
+            const logError = this.isServiceMode ? logger.error.bind(logger) : console.error;
+            logError('\n❌ 推送流程失败:', error.message);
+            if (this.isServiceMode) {
+                logger.error('错误详情:', error);
+            } else {
+                console.error('错误详情:', error);
+            }
+            
+            return {
+                success: false,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            };
+        }
+    }
+
+    /**
+     * 保存文章到本地文件
+     * @param {Object} articleData 文章数据
+     * @param {string} date 日期
+     */
+    async saveArticleToFile(articleData, date) {
+        const fs = require('fs').promises;
+        const path = require('path');
+        
+        try {
+            const outputDir = path.join(__dirname, '../output');
+            await fs.mkdir(outputDir, { recursive: true });
+            
+            const filename = `article_${date.replace(/\//g, '-')}.md`;
+            const filepath = path.join(outputDir, filename);
+            
+            const content = `# ${articleData.title}
+
+**日期:** ${date}
+
+---
+
+${articleData.content}
+`;
+            
+            await fs.writeFile(filepath, content, 'utf8');
+            console.log('📄 文章已保存到本地文件:', filepath);
+        } catch (error) {
+            console.error('保存文章到本地失败:', error.message);
+        }
+    }
+
+    /**
+     * 设置AI服务配置
+     * @param {string} token 元宝AI Token
+     * @param {string} userId 用户ID
+     */
+    setAIConfig(token, userId) {
+        if (token) this.aiService.setToken(token);
+        if (userId) this.aiService.setUserId(userId);
+    }
+
+    /**
+     * 设置微信公众号配置
+     * @param {string} appId 应用ID
+     * @param {string} appSecret 应用密钥
+     */
+    setWechatConfig(appId, appSecret) {
+        this.wechatService.setConfig(appId, appSecret);
+    }
+}
+
+// 如果直接运行此文件
+if (require.main === module) {
+    // 解析命令行参数
+    const args = process.argv.slice(2);
+    
+    if (args.includes('--help') || args.includes('-h')) {
+        console.log(`
+微信公众号自动推送工具
+
+使用方法:
+  npm start              # 执行一次推送
+  npm run daemon         # 启动后台服务
+  npm run help           # 显示帮助信息
+  npm run config         # 显示配置说明
+
+环境变量配置:
+  YUANBAO_TOKEN         # 元宝AI的访问令牌 (必需)
+  YUANBAO_USER_ID       # 元宝AI的用户ID (必需)
+  WECHAT_APP_ID         # 微信公众号AppID (可选)
+  WECHAT_APP_SECRET     # 微信公众号AppSecret (可选)
+
+后台服务管理:
+  npm run daemon start  # 启动后台服务
+  npm run daemon stop   # 停止后台服务
+  npm run daemon status # 查看服务状态
+  npm run daemon run    # 手动执行一次推送
+
+示例:
+  # 复制环境变量模板
+  cp .env.example .env
+  
+  # 编辑.env文件，填入你的配置
+  # 然后运行推送
+  npm start
+  
+  # 或启动后台服务（每天8点自动推送）
+  npm run daemon start
+        `);
+        process.exit(0);
+    }
+    
+    if (args.includes('--config')) {
+        console.log(`
+配置说明:
+
+1. 元宝AI配置 (必需):
+   - 访问 https://yuanbao.tencent.com/ 获取API访问权限
+   - 在.env文件中设置:
+     YUANBAO_TOKEN=your_token_here
+     YUANBAO_USER_ID=your_user_id_here
+
+2. 微信公众号配置 (可选):
+   - 登录微信公众平台 https://mp.weixin.qq.com/
+   - 在开发 -> 基本配置中获取AppID和AppSecret
+   - 在.env文件中设置:
+     WECHAT_APP_ID=your_app_id_here
+     WECHAT_APP_SECRET=your_app_secret_here
+
+3. 后台服务配置:
+   - 服务将在每天上午8点自动执行推送
+   - 日志文件保存在 logs/ 目录下
+   - 支持PM2进程管理
+
+注意: 如果未配置微信公众号，文章将保存到本地文件
+        `);
+        process.exit(0);
+    }
+    
+    // 创建应用实例并运行
+    const app = new AutoPushApp();
+    app.run().catch(error => {
+        console.error('应用运行失败:', error);
+        process.exit(1);
+    });
+}
+
+module.exports = AutoPushApp;
