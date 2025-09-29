@@ -89,14 +89,15 @@ class AutoPushApp {
             if (!process.env.WECHAT_APP_ID || !process.env.WECHAT_APP_SECRET) {
                 logInfo('⚠️  微信公众号配置未设置，跳过推送步骤');
                 logInfo('请在.env文件中设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET');
-                
-                // 保存文章到本地文件
-                await this.saveArticleToFile(articleData, newsData.date);
             } else {
+                // 推送到微信公众号
                 const mediaId = await this.wechatService.createDraft(articleData);
                 logInfo('✅ 文章已成功推送到微信公众号草稿箱');
                 logInfo('草稿ID:', mediaId);
             }
+            
+            // 无论是否推送微信，都保存文章到本地文件作为备份
+            await this.saveArticleToFile(articleData, newsData.date);
             
             logInfo('\n=== 推送流程完成 ===');
             return {
@@ -133,25 +134,58 @@ class AutoPushApp {
         const path = require('path');
         
         try {
-            const outputDir = path.join(__dirname, '../output');
+            // 创建按年月分组的目录结构
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            
+            const outputDir = path.join(__dirname, '../output', `${year}`, `${month}`);
             await fs.mkdir(outputDir, { recursive: true });
             
-            const filename = `article_${date.replace(/\//g, '-')}.md`;
+            // 生成文件名，包含时间戳避免重复
+            const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const filename = `article_${date.replace(/\//g, '-')}_${timestamp}.md`;
             const filepath = path.join(outputDir, filename);
             
+            // 构建更详细的文章内容
             const content = `# ${articleData.title}
 
-**日期:** ${date}
+**📅 发布日期:** ${date}
+**👤 作者:** ${articleData.author || '喵酱'}
+**📝 摘要:** ${articleData.digest || ''}
+**🔗 来源链接:** ${articleData.sourceUrl || ''}
+**⏰ 保存时间:** ${now.toLocaleString('zh-CN')}
 
 ---
 
 ${articleData.content}
+
+---
+
+> 本文由微信公众号自动推送工具生成并保存
+> 生成时间: ${now.toLocaleString('zh-CN')}
 `;
             
             await fs.writeFile(filepath, content, 'utf8');
-            console.log('📄 文章已保存到本地文件:', filepath);
+            
+            const logInfo = this.isServiceMode ? logger.info.bind(logger) : console.log;
+            logInfo('📄 文章已保存到本地文件:', filepath);
+            
+            // 同时保存一份JSON格式的数据，便于后续处理
+            const jsonFilepath = filepath.replace('.md', '.json');
+            const jsonData = {
+                ...articleData,
+                saveTime: now.toISOString(),
+                date: date,
+                filepath: filepath
+            };
+            
+            await fs.writeFile(jsonFilepath, JSON.stringify(jsonData, null, 2), 'utf8');
+            logInfo('📊 文章数据已保存到:', jsonFilepath);
+            
         } catch (error) {
-            console.error('保存文章到本地失败:', error.message);
+            const logError = this.isServiceMode ? logger.error.bind(logger) : console.error;
+            logError('保存文章到本地失败:', error.message);
         }
     }
 
