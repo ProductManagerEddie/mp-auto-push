@@ -92,15 +92,16 @@ class WechatService {
      * @param {Object} articleData 文章数据
      * @returns {Promise<string>} media_id
      */
-    async createDraft(articleData) {
+    async createDraft(articleData, titleMode = 'smart') {
         try {
             console.log('正在创建公众号草稿...');
             const accessToken = await this.getAccessToken();
             
             const { title, content, author = '', digest = '', imageUrl, sourceUrl = '' } = articleData;
             
-            // 验证并截断标题以符合微信公众号限制
-            const validatedTitle = this.validateAndTruncateTitle(title);
+            // 验证并优化标题以符合微信公众号限制
+            console.log(`使用${titleMode}模式处理标题: ${title}`);
+            const validatedTitle = this.validateAndTruncateTitle(title, titleMode);
             
             // 将markdown格式的内容转换为HTML格式
             console.log('正在将Markdown内容转换为HTML格式...');
@@ -211,11 +212,12 @@ class WechatService {
     }
 
     /**
-     * 检查并截断标题以符合微信公众号限制
+     * 智能优化标题以符合微信公众号限制
      * @param {string} title 原始标题
+     * @param {string} mode 处理模式: 'smart'(智能), 'simple'(简单截断), 'extract'(提取关键词)
      * @returns {string} 处理后的标题
      */
-    validateAndTruncateTitle(title) {
+    validateAndTruncateTitle(title, mode = 'smart') {
         const MAX_TITLE_BYTES = 64; // 微信公众号标题最大字节数
         
         if (!title) {
@@ -230,9 +232,186 @@ class WechatService {
             return title;
         }
 
-        console.log(`标题过长，需要截断: ${title.length}字符, ${titleBytes}字节 > ${MAX_TITLE_BYTES}字节`);
+        console.log(`标题过长，需要优化: ${title.length}字符, ${titleBytes}字节 > ${MAX_TITLE_BYTES}字节`);
+        console.log(`使用${mode}模式处理标题`);
         
-        // 逐字符截断，确保不超过字节限制
+        let optimizedTitle = '';
+        
+        switch (mode) {
+            case 'smart':
+                optimizedTitle = this.smartTitleOptimization(title, MAX_TITLE_BYTES);
+                break;
+            case 'extract':
+                optimizedTitle = this.extractKeywordsTitle(title, MAX_TITLE_BYTES);
+                break;
+            case 'simple':
+            default:
+                optimizedTitle = this.simpleTruncateTitle(title, MAX_TITLE_BYTES);
+                break;
+        }
+        
+        const finalBytes = Buffer.byteLength(optimizedTitle, 'utf8');
+        console.log(`标题优化完成: ${optimizedTitle.length}字符, ${finalBytes}字节`);
+        console.log(`优化后标题: ${optimizedTitle}`);
+        
+        return optimizedTitle;
+    }
+
+    /**
+     * 智能标题优化 - 保留最有趣和最重要的部分
+     * @param {string} title 原始标题
+     * @param {number} maxBytes 最大字节数
+     * @returns {string} 优化后的标题
+     */
+    smartTitleOptimization(title, maxBytes) {
+        // 定义关键词优先级（越高越重要）
+        const keywordPriority = {
+            // 时间相关
+            '今天': 3, '明天': 3, '昨天': 3,
+            '2025': 2, '2024': 2, '年': 1, '月': 1, '日': 1,
+            
+            // 有趣的表达
+            '喵呜': 5, '喵喵': 5, '两脚兽': 4, '教授': 3,
+            '新闻罐头': 5, 'Wi-Fi': 4, '尾巴天线': 4,
+            '小鱼干': 4, '本喵': 4,
+            
+            // 动作词
+            '截获': 3, '带着': 2, '准备': 2, '看看': 2,
+            
+            // 修饰词
+            '新鲜': 3, '重点': 3, '好多': 2
+        };
+
+        // 尝试不同的组合策略
+        const strategies = [
+            // 策略1: 保留开头的称呼 + 核心内容
+            () => this.buildTitleFromParts(title, ['喵呜~', '新闻罐头', 'Wi-Fi尾巴天线', '小鱼干'], maxBytes),
+            
+            // 策略2: 保留时间 + 特色词汇
+            () => this.buildTitleFromParts(title, ['今天', '喵喵酱', '新闻罐头', 'Wi-Fi'], maxBytes),
+            
+            // 策略3: 保留最有特色的部分
+            () => this.buildTitleFromParts(title, ['两脚兽教授', '本喵喵酱', 'Wi-Fi尾巴天线'], maxBytes),
+            
+            // 策略4: 简化版本
+            () => this.buildTitleFromParts(title, ['喵呜~', '今天', '新闻'], maxBytes)
+        ];
+
+        // 尝试每个策略，返回第一个成功的
+        for (const strategy of strategies) {
+            const result = strategy();
+            if (result && Buffer.byteLength(result, 'utf8') <= maxBytes) {
+                return result;
+            }
+        }
+
+        // 如果所有策略都失败，使用简单截断
+        return this.simpleTruncateTitle(title, maxBytes);
+    }
+
+    /**
+     * 从标题中构建包含指定关键词的新标题
+     * @param {string} originalTitle 原始标题
+     * @param {string[]} keywords 要包含的关键词
+     * @param {number} maxBytes 最大字节数
+     * @returns {string} 构建的标题
+     */
+    buildTitleFromParts(originalTitle, keywords, maxBytes) {
+        const foundParts = [];
+        
+        // 查找包含关键词的部分
+        for (const keyword of keywords) {
+            if (originalTitle.includes(keyword)) {
+                // 找到关键词周围的上下文
+                const index = originalTitle.indexOf(keyword);
+                let start = Math.max(0, index - 5);
+                let end = Math.min(originalTitle.length, index + keyword.length + 5);
+                
+                // 调整边界到合适的位置（避免截断字符）
+                while (start > 0 && !/[，。！？~\s]/.test(originalTitle[start - 1])) {
+                    start--;
+                }
+                while (end < originalTitle.length && !/[，。！？~\s]/.test(originalTitle[end])) {
+                    end++;
+                }
+                
+                const part = originalTitle.substring(start, end).trim();
+                if (part && !foundParts.includes(part)) {
+                    foundParts.push(part);
+                }
+            }
+        }
+
+        if (foundParts.length === 0) {
+            return null;
+        }
+
+        // 组合找到的部分
+        let result = foundParts.join(' ');
+        
+        // 如果还是太长，尝试只用最重要的部分
+        if (Buffer.byteLength(result, 'utf8') > maxBytes - 3) {
+            result = foundParts[0];
+        }
+        
+        // 如果还是太长，进行截断
+        if (Buffer.byteLength(result, 'utf8') > maxBytes - 3) {
+            result = this.simpleTruncateTitle(result, maxBytes);
+        } else {
+            result += '...';
+        }
+
+        return result;
+    }
+
+    /**
+     * 提取关键词生成标题
+     * @param {string} title 原始标题
+     * @param {number} maxBytes 最大字节数
+     * @returns {string} 关键词标题
+     */
+    extractKeywordsTitle(title, maxBytes) {
+        // 提取关键信息
+        const keywords = [];
+        
+        // 提取时间信息
+        const timeMatch = title.match(/\d{4}年\d{1,2}月\d{1,2}日/);
+        if (timeMatch) {
+            keywords.push(timeMatch[0]);
+        } else if (title.includes('今天')) {
+            keywords.push('今天');
+        }
+        
+        // 提取特色词汇
+        const specialWords = ['喵呜', '喵喵酱', '两脚兽', '新闻罐头', 'Wi-Fi', '小鱼干'];
+        for (const word of specialWords) {
+            if (title.includes(word) && keywords.length < 3) {
+                keywords.push(word);
+            }
+        }
+        
+        // 添加通用词
+        if (keywords.length < 2) {
+            keywords.push('新闻速递');
+        }
+
+        let result = keywords.join(' ') + '...';
+        
+        // 确保不超过字节限制
+        if (Buffer.byteLength(result, 'utf8') > maxBytes) {
+            result = keywords[0] + '...';
+        }
+
+        return result;
+    }
+
+    /**
+     * 简单截断标题（原来的方法）
+     * @param {string} title 原始标题
+     * @param {number} maxBytes 最大字节数
+     * @returns {string} 截断后的标题
+     */
+    simpleTruncateTitle(title, maxBytes) {
         let truncatedTitle = '';
         let currentBytes = 0;
         
@@ -240,8 +419,7 @@ class WechatService {
             const char = title[i];
             const charBytes = Buffer.byteLength(char, 'utf8');
             
-            // 如果加上这个字符会超过限制，就停止
-            if (currentBytes + charBytes > MAX_TITLE_BYTES - 3) { // 预留3字节给省略号
+            if (currentBytes + charBytes > maxBytes - 3) {
                 break;
             }
             
@@ -249,14 +427,7 @@ class WechatService {
             currentBytes += charBytes;
         }
         
-        // 添加省略号
-        truncatedTitle += '...';
-        
-        const finalBytes = Buffer.byteLength(truncatedTitle, 'utf8');
-        console.log(`标题截断完成: ${truncatedTitle.length}字符, ${finalBytes}字节`);
-        console.log(`截断后标题: ${truncatedTitle}`);
-        
-        return truncatedTitle;
+        return truncatedTitle + '...';
     }
 
     /**
