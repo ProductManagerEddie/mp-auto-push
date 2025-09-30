@@ -94,6 +94,48 @@ class AutoPushApp {
                 const mediaId = await this.wechatService.createDraft(articleData);
                 logInfo('✅ 文章已成功推送到微信公众号草稿箱');
                 logInfo('草稿ID:', mediaId);
+                
+                // 检查是否需要自动发布
+                const autoPublish = process.env.AUTO_PUBLISH === 'true';
+                if (autoPublish) {
+                    logInfo('🚀 开始自动发布文章...');
+                    try {
+                        const publishResult = await this.wechatService.publishDraft(mediaId);
+                        logInfo('✅ 文章发布请求已提交');
+                        logInfo('发布任务ID:', publishResult.publish_id);
+                        
+                        // 检查是否需要查询发布状态
+                        const checkStatus = process.env.CHECK_PUBLISH_STATUS !== 'false';
+                        if (checkStatus) {
+                            logInfo('⏳ 等待3秒后查询发布状态...');
+                            await new Promise(resolve => setTimeout(resolve, 3000));
+                            
+                            const statusResult = await this.wechatService.getPublishStatus(publishResult.publish_id);
+                            const statusText = this.wechatService.getPublishStatusText(statusResult.publish_status);
+                            logInfo(`📊 发布状态: ${statusText}`);
+                            
+                            if (statusResult.publish_status === 0) {
+                                logInfo('🎉 文章发布成功！');
+                                if (statusResult.article_detail && statusResult.article_detail.url) {
+                                    logInfo('📖 文章链接:', statusResult.article_detail.url);
+                                }
+                            } else if (statusResult.publish_status === 1) {
+                                logInfo('⏳ 文章正在发布中，请稍后查看公众号');
+                            } else {
+                                logInfo('❌ 文章发布失败，请检查内容是否符合微信规范');
+                                if (statusResult.fail_idx && statusResult.fail_idx.length > 0) {
+                                    logInfo('失败详情:', statusResult.fail_idx);
+                                }
+                            }
+                        }
+                    } catch (publishError) {
+                        logInfo('❌ 自动发布失败:', publishError.message);
+                        logInfo('💡 文章已保存为草稿，您可以手动发布');
+                    }
+                } else {
+                    logInfo('💡 自动发布已关闭，文章已保存为草稿');
+                    logInfo('如需自动发布，请在.env文件中设置 AUTO_PUBLISH=true');
+                }
             }
             
             // 无论是否推送微信，都保存文章到本地文件作为备份

@@ -150,6 +150,98 @@ class WechatService {
     }
 
     /**
+     * 发布草稿
+     * @param {string} mediaId 草稿的media_id
+     * @returns {Promise<string>} 发布结果
+     */
+    async publishDraft(mediaId) {
+        try {
+            console.log('正在发布草稿...');
+            const accessToken = await this.getAccessToken();
+            
+            const publishData = {
+                media_id: mediaId
+            };
+
+            const response = await axios.post(
+                `https://api.weixin.qq.com/cgi-bin/freepublish/submit?access_token=${accessToken}`,
+                publishData,
+                {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+
+            if (response.data.errcode === 0) {
+                console.log('草稿发布成功，publish_id:', response.data.publish_id);
+                return response.data.publish_id;
+            } else {
+                console.error('草稿发布失败:', JSON.stringify(response.data));
+                throw new Error(`发布草稿失败: ${response.data.errmsg}`);
+            }
+        } catch (error) {
+            console.error('发布草稿失败:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * 查询发布状态
+     * @param {string} publishId 发布任务的publish_id
+     * @returns {Promise<Object>} 发布状态信息
+     */
+    async getPublishStatus(publishId) {
+        try {
+            const accessToken = await this.getAccessToken();
+            
+            const response = await axios.post(
+                `https://api.weixin.qq.com/cgi-bin/freepublish/get?access_token=${accessToken}`,
+                {
+                    publish_id: publishId
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+
+            if (response.data.errcode === 0) {
+                return {
+                    status: response.data.publish_status,
+                    statusText: this.getPublishStatusText(response.data.publish_status),
+                    failReason: response.data.fail_reason || '',
+                    articleId: response.data.article_id || '',
+                    articleUrl: response.data.article_url || ''
+                };
+            } else {
+                throw new Error(`查询发布状态失败: ${response.data.errmsg}`);
+            }
+        } catch (error) {
+            console.error('查询发布状态失败:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * 获取发布状态文本描述
+     * @param {number} status 发布状态码
+     * @returns {string} 状态描述
+     */
+    getPublishStatusText(status) {
+        const statusMap = {
+            0: '发布成功',
+            1: '发布失败',
+            2: '审核中',
+            3: '原创校验中',
+            4: '原创校验失败',
+            5: '成功后用户删除所有文章'
+        };
+        return statusMap[status] || '未知状态';
+    }
+
+    /**
      * 将markdown格式转换为HTML格式
      * @param {string} markdownContent markdown格式的内容
      * @returns {string} HTML格式的内容
