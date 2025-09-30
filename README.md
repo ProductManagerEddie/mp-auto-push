@@ -333,6 +333,24 @@ npm run pm2:status
 6. **磁盘空间**: 定期清理日志文件，避免磁盘空间不足
 7. **进程监控**: 建议使用PM2或systemd进行生产环境部署
 
+## 鸣谢
+
+感谢以下优秀的开源项目和服务，为本项目提供了重要支持：
+
+### 🌍 数据源
+- **[60s API](https://github.com/vikiboss/60s)** <mcreference link="https://github.com/vikiboss/60s" index="0">0</mcreference>
+  - 提供高质量的每日新闻数据源
+  - 毫秒级响应，全球CDN加速
+  - 开源、可靠、免费的新闻API服务
+
+### 🤖 AI服务
+- **[腾讯元宝](https://yuanbao.tencent.com/)** <mcreference link="https://yuanbao.tencent.com/" index="1">1</mcreference>
+  - 提供强大的AI文章生成能力
+  - 智能内容创作和文本处理
+  - 专业的智能助手服务
+
+感谢这些项目的开发者和维护者，让我们能够构建更好的自动化工具！
+
 ## 许可证
 
 MIT License
