@@ -351,6 +351,9 @@ npm run pm2:status
 
 感谢这些项目的开发者和维护者，让我们能够构建更好的自动化工具！
 
+### 落地项目
+https://mp.weixin.qq.com/s/Q6czcqKrWl_fNm4mdclb-w
+
 ## 许可证
 
 MIT License
