@@ -5,7 +5,7 @@ const axios = require('axios');
  */
 class NewsService {
     constructor() {
-        this.apiUrl = 'http://localhost:4399/v2/60s';
+        this.apiUrl = 'https://60s.viki.moe/v2/60s';
     }
 
     /**

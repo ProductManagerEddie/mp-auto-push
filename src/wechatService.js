@@ -1,5 +1,8 @@
 const axios = require('axios');
-const { marked } = require('marked');
+const marked = require('marked');
+const { createCanvas, registerFont } = require('canvas');
+const path = require('path');
+const fs = require('fs');
 
 /**
  * 微信公众号服务
@@ -45,7 +48,7 @@ class WechatService {
 
     /**
      * 上传图片素材
-     * @param {string} imageUrl 图片URL
+     * @param {string} imageUrl 图片URL或本地文件路径
      * @returns {Promise<string>} media_id
      */
     async uploadImage(imageUrl) {
@@ -53,20 +56,44 @@ class WechatService {
             console.log('正在上传图片素材...');
             const accessToken = await this.getAccessToken();
             
-            // 下载图片
-            const imageResponse = await axios.get(imageUrl, {
-                responseType: 'stream',
-                timeout: 15000
-            });
+            let imageStream;
+            let filename = 'image.jpg';
+            
+            // 检查是否是本地文件路径
+            if (imageUrl.startsWith('file://') || !imageUrl.startsWith('http')) {
+                // 处理本地文件
+                const filePath = imageUrl.startsWith('file://') ? imageUrl.substring(7) : imageUrl;
+                console.log('上传本地文件:', filePath);
+                
+                // 检查文件是否存在
+                if (!fs.existsSync(filePath)) {
+                    throw new Error(`本地文件不存在: ${filePath}`);
+                }
+                
+                // 获取文件名
+                filename = path.basename(filePath);
+                
+                // 创建文件流
+                imageStream = fs.createReadStream(filePath);
+            } else {
+                // 处理远程URL
+                console.log('下载远程图片:', imageUrl);
+                const imageResponse = await axios.get(imageUrl, {
+                    responseType: 'stream',
+                    timeout: 15000
+                });
+                
+                imageStream = imageResponse.data;
+            }
 
             const FormData = require('form-data');
             const form = new FormData();
-            form.append('media', imageResponse.data, {
-                filename: 'image.jpg',
+            form.append('media', imageStream, {
+                filename: filename,
                 contentType: 'image/jpeg'
             });
 
-            const uploadUrl = `https://api.weixin.qq.com/cgi-bin/media/upload?access_token=${accessToken}&type=image`;
+            const uploadUrl = `https://api.weixin.qq.com/cgi-bin/material/add_material?access_token=${accessToken}&type=image`;
             
             const uploadResponse = await axios.post(uploadUrl, form, {
                 headers: {
@@ -89,42 +116,80 @@ class WechatService {
 
     /**
      * 创建草稿
-     * @param {Object} articleData 文章数据
+     * @param {Array} articlesData 多篇文章数据数组，必须包含四篇文章，对应四种彩票类型
      * @returns {Promise<string>} media_id
      */
-    async createDraft(articleData, titleMode = 'smart') {
+    async createDraft(articlesData) {
         try {
             console.log('正在创建公众号草稿...');
             const accessToken = await this.getAccessToken();
             
-            const { title, content, author = '', digest = '', imageUrl, sourceUrl = '' } = articleData;
+            // 验证文章数据
+            this.validateArticlesData(articlesData);
             
-            // 验证并优化标题以符合微信公众号限制
-            console.log(`使用${titleMode}模式处理标题: ${title}`);
-            const validatedTitle = this.validateAndTruncateTitle(title, titleMode);
-            
-            // 将markdown格式的内容转换为HTML格式
-            console.log('正在将Markdown内容转换为HTML格式...');
-            const htmlContent = this.convertMarkdownToHtml(content);
-            
-            let thumbMediaId = 'o_s2F7-Cq3hnVhL1sgs57RmEKtl0CsG7HZ_LYY2jYTZoyUQM2AnKQH4SrqHXBJ2o';
+            // 处理每篇文章
+            const articles = [];
+            for (const articleItem of articlesData) {
+                const { articleData, lotteryData } = articleItem;
+                const { title, content, author = '', digest = '' } = articleData;
+                
+                // 验证并优化标题以符合微信公众号限制
+                console.log(`使用smart模式处理标题: ${title}`);
+                const validatedTitle = this.validateAndTruncateTitle(title, 'smart');
+                
+                // 将markdown格式的内容转换为HTML格式
+                console.log('正在将Markdown内容转换为HTML格式...');
+                const htmlContent = this.convertMarkdownToHtml(content);
+                
+                let thumbMediaId = '';
 
-            if (imageUrl) {
-                // thumbMediaId = await this.uploadImage(imageUrl);
+                if (lotteryData) {
+                    // 如果有彩票数据，生成彩票图片
+                    try {
+                        const lotteryImagePath = await this.generateLotteryImage(lotteryData);
+                        // 将本地图片路径转换为file:// URL
+                        const lotteryImageUrl = `file://${lotteryImagePath}`;
+                        thumbMediaId = await this.uploadImage(lotteryImageUrl);
+                        console.log('使用生成的彩票图片上传成功，media_id:', thumbMediaId);
+                    } catch (error) {
+                        console.error('生成彩票图片失败:', error.message);
+                        // 如果彩票图片生成失败，尝试使用默认图片
+                        const defaultImageUrl = 'https://picsum.photos/seed/lottery/800/600.jpg';
+                        try {
+                            thumbMediaId = await this.uploadImage(defaultImageUrl);
+                            console.log('使用默认图片上传成功，media_id:', thumbMediaId);
+                        } catch (defaultError) {
+                            console.error('默认图片上传失败:', defaultError.message);
+                            thumbMediaId = '';
+                        }
+                    }
+                } else {
+                    // 如果没有提供彩票数据，尝试上传一个默认图片
+                    // 使用一个公开可访问的图片URL
+                    const defaultImageUrl = 'https://picsum.photos/seed/lottery/800/600.jpg';
+                    try {
+                        thumbMediaId = await this.uploadImage(defaultImageUrl);
+                        console.log('使用默认图片上传成功，media_id:', thumbMediaId);
+                    } catch (error) {
+                        console.error('默认图片上传失败:', error.message);
+                        // 如果默认图片上传失败，使用一个空字符串，让微信API使用默认图片
+                        thumbMediaId = '';
+                    }
+                }
+
+                articles.push({
+                    title: validatedTitle,
+                    author: author,
+                    digest: digest || content.substring(0, 100) + '...',
+                    content: htmlContent,
+                    thumb_media_id: thumbMediaId,
+                    need_open_comment: 0,
+                    only_fans_can_comment: 0
+                });
             }
 
             const draftData = {
-                articles: [
-                    {
-                        title: validatedTitle,
-                        author: author,
-                        digest: digest || content.substring(0, 100) + '...',
-                        content: htmlContent,
-                        thumb_media_id: thumbMediaId,
-                        need_open_comment: 0,
-                        only_fans_can_comment: 0
-                    }
-                ]
+                articles: articles
             };
             console.log('草稿数据:', draftData);
             const url = `https://api.weixin.qq.com/cgi-bin/draft/add?access_token=${accessToken}`;
@@ -136,17 +201,107 @@ class WechatService {
                 timeout: 30000
             });
 
+            // 检查微信API响应
+            if (response.data.errcode && response.data.errcode !== 0) {
+                console.error('微信API返回错误:', JSON.stringify(response.data));
+                throw new Error(`创建草稿失败: 错误码${response.data.errcode}, 错误信息: ${response.data.errmsg}`);
+            }
+            
             if (response.data.media_id) {
                 console.log('草稿创建成功，media_id:', response.data.media_id);
                 return response.data.media_id;
             } else {
-                console.error('草稿创建失败:', JSON.stringify(response.data));
-                throw new Error(`创建草稿失败: ${response.data.errmsg}`);
+                console.error('草稿创建失败，未返回media_id:', JSON.stringify(response.data));
+                throw new Error(`创建草稿失败: 未返回media_id`);
             }
         } catch (error) {
             console.error('创建草稿失败:', error.message);
             throw error;
         }
+    }
+
+    /**
+     * 验证文章数据，确保草稿包含当天开奖的彩票文章，且按固定顺序排列
+     * @param {Array} articlesData 多篇文章数据数组
+     * @throws {Error} 验证失败时抛出错误
+     */
+    validateArticlesData(articlesData) {
+        // 验证文章数量
+        if (!Array.isArray(articlesData)) {
+            throw new Error('文章数据必须是数组');
+        }
+        
+        // 如果没有文章数据，直接通过验证（在主程序中已处理）
+        if (articlesData.length === 0) {
+            console.log('文章数据为空，跳过验证');
+            return;
+        }
+        
+        // 定义支持的彩票类型（固定顺序）
+        const supportedTypes = ['ssq', 'kl8', 'qlc', '3d'];
+        const articleTypes = [];
+        
+        // 验证每篇文章的类型
+        for (const articleItem of articlesData) {
+            const { articleData, lotteryType } = articleItem;
+            
+            if (!articleData || typeof articleData !== 'object') {
+                throw new Error('每篇文章必须包含有效的articleData对象');
+            }
+            
+            if (!articleData.title || !articleData.content) {
+                throw new Error('每篇文章必须包含标题和内容');
+            }
+            
+            let resolvedType = lotteryType;
+            
+            // 如果没有直接提供lotteryType，则尝试从标题中提取
+            if (!resolvedType) {
+                resolvedType = this.extractLotteryTypeFromTitle(articleData.title);
+            }
+            
+            if (!resolvedType) {
+                throw new Error(`无法确定文章类型，标题："${articleData.title}"`);
+            }
+            
+            if (!supportedTypes.includes(resolvedType)) {
+                throw new Error(`文章类型"${resolvedType}"无效，必须是以下类型之一：${supportedTypes.join(', ')}`);
+            }
+            
+            articleTypes.push(resolvedType);
+        }
+        
+        // 验证没有重复的文章类型
+        const uniqueTypes = [...new Set(articleTypes)];
+        
+        if (uniqueTypes.length !== articleTypes.length) {
+            throw new Error('文章类型不能有重复');
+        }
+        
+        console.log(`文章数据验证通过，共包含${articlesData.length}篇文章`);
+    }
+
+    /**
+     * 从文章标题中提取彩票类型
+     * @param {string} title 文章标题
+     * @returns {string|null} 彩票类型，如ssq、kl8、qlc、3d，提取失败返回null
+     */
+    extractLotteryTypeFromTitle(title) {
+        const typeMap = {
+            '双色球': 'ssq',
+            '快乐8': 'kl8',
+            '七乐彩': 'qlc',
+            '福彩3D': '3d',
+            '3D': '3d'
+        };
+        
+        for (const [keyword, type] of Object.entries(typeMap)) {
+            if (title.includes(keyword)) {
+                return type;
+            }
+        }
+        
+        return null;
     }
 
     /**
@@ -248,17 +403,14 @@ class WechatService {
      */
     convertMarkdownToHtml(markdownContent) {
         try {
-            // 配置marked选项，适合微信公众号
-            marked.setOptions({
+            // 转换markdown为HTML（使用新版本marked API）
+            const htmlContent = marked.parse(markdownContent, {
                 breaks: true,        // 支持换行符转换为<br>
                 gfm: true,          // 支持GitHub风格的markdown
                 sanitize: false,    // 不过滤HTML标签
                 smartLists: true,   // 智能列表
                 smartypants: false  // 不转换引号等字符
             });
-
-            // 转换markdown为HTML
-            const htmlContent = marked(markdownContent);
             
             // 微信公众号HTML样式优化
             const styledHtml = this.optimizeHtmlForWechat(htmlContent);
@@ -280,25 +432,55 @@ class WechatService {
     optimizeHtmlForWechat(htmlContent) {
         let optimizedHtml = htmlContent;
 
-        // 为段落添加样式
-        optimizedHtml = optimizedHtml.replace(/<p>/g, '<p style="margin: 10px 0; line-height: 1.6; text-align: justify;">');
+        // 添加整体容器样式
+        optimizedHtml = `<div style="max-width: 680px; margin: 0 auto; padding: 20px; background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">${optimizedHtml}</div>`;
+
+        // 为段落添加更丰富的样式
+        optimizedHtml = optimizedHtml.replace(/<p>/g, '<p style="margin: 16px 0; line-height: 1.8; text-align: justify; font-size: 16px; color: #333333;">');
         
-        // 为标题添加样式
-        optimizedHtml = optimizedHtml.replace(/<h1>/g, '<h1 style="font-size: 24px; font-weight: bold; margin: 20px 0 10px 0; color: #333;">');
-        optimizedHtml = optimizedHtml.replace(/<h2>/g, '<h2 style="font-size: 20px; font-weight: bold; margin: 18px 0 8px 0; color: #333;">');
-        optimizedHtml = optimizedHtml.replace(/<h3>/g, '<h3 style="font-size: 18px; font-weight: bold; margin: 16px 0 6px 0; color: #333;">');
+        // 为标题添加优化样式
+        optimizedHtml = optimizedHtml.replace(/<h1>/g, '<h1 style="font-size: 28px; font-weight: bold; margin: 25px 0 15px 0; color: #2c3e50; text-align: center; padding: 15px 0; border-bottom: 2px solid #e8e8e8;">');
+        optimizedHtml = optimizedHtml.replace(/<h2>/g, '<h2 style="font-size: 24px; font-weight: bold; margin: 22px 0 12px 0; color: #34495e; background-color: #f8f9fa; padding: 10px 15px; border-left: 4px solid #3498db;">');
+        optimizedHtml = optimizedHtml.replace(/<h3>/g, '<h3 style="font-size: 20px; font-weight: bold; margin: 20px 0 10px 0; color: #2c3e50; padding: 8px 12px; background-color: #f0f2f5;">');
         
-        // 为列表添加样式
-        optimizedHtml = optimizedHtml.replace(/<ul>/g, '<ul style="margin: 10px 0; padding-left: 20px;">');
-        optimizedHtml = optimizedHtml.replace(/<ol>/g, '<ol style="margin: 10px 0; padding-left: 20px;">');
-        optimizedHtml = optimizedHtml.replace(/<li>/g, '<li style="margin: 5px 0; line-height: 1.6;">');
+        // 为列表添加优化样式
+        optimizedHtml = optimizedHtml.replace(/<ul>/g, '<ul style="margin: 16px 0; padding-left: 25px; background-color: #fafafa; padding: 15px; border-radius: 8px;">');
+        optimizedHtml = optimizedHtml.replace(/<ol>/g, '<ol style="margin: 16px 0; padding-left: 25px; background-color: #fafafa; padding: 15px; border-radius: 8px;">');
+        optimizedHtml = optimizedHtml.replace(/<li>/g, '<li style="margin: 8px 0; line-height: 1.8; font-size: 15px; color: #4a5568; list-style-type: disc; list-style-position: inside;">');
         
         // 为强调文本添加样式
-        optimizedHtml = optimizedHtml.replace(/<strong>/g, '<strong style="font-weight: bold; color: #d32f2f;">');
-        optimizedHtml = optimizedHtml.replace(/<em>/g, '<em style="font-style: italic; color: #1976d2;">');
+        optimizedHtml = optimizedHtml.replace(/<strong>/g, '<strong style="font-weight: bold; color: #e74c3c; background-color: #fff5f5; padding: 2px 6px; border-radius: 3px;">');
+        optimizedHtml = optimizedHtml.replace(/<em>/g, '<em style="font-style: italic; color: #3498db; background-color: #f0f8ff; padding: 2px 6px; border-radius: 3px;">');
         
         // 为引用添加样式
-        optimizedHtml = optimizedHtml.replace(/<blockquote>/g, '<blockquote style="margin: 15px 0; padding: 10px 15px; border-left: 4px solid #ddd; background-color: #f9f9f9; font-style: italic;">');
+        optimizedHtml = optimizedHtml.replace(/<blockquote>/g, '<blockquote style="margin: 20px 0; padding: 15px 20px; border-left: 4px solid #3498db; background-color: #f8f9fa; font-style: italic; border-radius: 0 8px 8px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">');
+        
+        // 为开奖结果添加特殊样式（通用）
+        optimizedHtml = optimizedHtml.replace(/## 开奖结果一览|## 开奖结果速览|## 开奖结果/g, '<div style="margin: 20px 0; padding: 20px; background-color: #e8f5e8; border-radius: 10px; border: 1px solid #c8e6c9;"><h3 style="margin-top: 0; color: #2e7d32; font-size: 18px;">开奖结果一览</h3>');
+        
+        // 为数据分析添加特殊样式（通用）
+        optimizedHtml = optimizedHtml.replace(/## 数据分析与趋势解读|## 数据分析|## 趋势解读/g, '<div style="margin: 20px 0; padding: 20px; background-color: #e3f2fd; border-radius: 10px; border: 1px solid #bbdefb;"><h3 style="margin-top: 0; color: #1565c0; font-size: 18px;">数据分析与趋势解读</h3>');
+        
+        // 为号码分析添加特殊样式（通用，适用于所有彩票类型）
+        optimizedHtml = optimizedHtml.replace(/### 红球分析|### 蓝球分析|### 号码分析|### 数字分析/g, '<h4 style="margin: 18px 0 10px 0; color: #e53935; font-size: 16px; padding-bottom: 5px; border-bottom: 1px dashed #ffcdd2;">号码分析</h4>');
+        
+        // 为近期对比添加特殊样式（通用）
+        optimizedHtml = optimizedHtml.replace(/### 近期对比|### 历史数据对比|### 近期走势/g, '<h4 style="margin: 18px 0 10px 0; color: #f57c00; font-size: 16px; padding-bottom: 5px; border-bottom: 1px dashed #ffe0b2;">近期对比</h4>');
+        
+        // 为结论添加特殊样式（通用）
+        optimizedHtml = optimizedHtml.replace(/## 结语|## 总结|## 购彩小贴士/g, '<div style="margin: 20px 0; padding: 20px; background-color: #fff3e0; border-radius: 10px; border: 1px solid #ffe0b2;"><h3 style="margin-top: 0; color: #ef6c00; font-size: 18px;">结语</h3>');
+        
+        // 为快乐8号码添加特殊样式
+        optimizedHtml = optimizedHtml.replace(/红球号码：|红球：|蓝球号码：|蓝球：|号码：|数字：|开奖号码：/g, '<strong style="font-weight: bold; color: #e74c3c; background-color: #fff5f5; padding: 3px 8px; border-radius: 4px; margin: 0 2px;">开奖号码：</strong>');
+        
+        // 为特殊标签添加样式（如开奖日期、号码等）
+        optimizedHtml = optimizedHtml.replace(/\*\*(.*?)\*\*/g, '<span style="font-weight: bold; color: #e74c3c; background-color: #fff5f5; padding: 3px 8px; border-radius: 4px; margin: 0 2px;">$1</span>');
+        
+        // 为#标签添加样式
+        optimizedHtml = optimizedHtml.replace(/#{1,3} (.*?)(?=<|$)/g, '<span style="color: #95a5a6; font-size: 14px; margin-right: 10px;">#$1</span>');
+        
+        // 添加结束标签的样式（如果有需要）
+        optimizedHtml = optimizedHtml.replace(/<\/div>\s*<\/div>/g, '</div></div>');
 
         return optimizedHtml;
     }
@@ -380,10 +562,10 @@ class WechatService {
             () => this.buildTitleFromParts(title, ['喵呜~', '新闻罐头', 'Wi-Fi尾巴天线', '小鱼干'], maxBytes),
             
             // 策略2: 保留时间 + 特色词汇
-            () => this.buildTitleFromParts(title, ['今天', '喵喵酱', '新闻罐头', 'Wi-Fi'], maxBytes),
+            () => this.buildTitleFromParts(title, ['今天', '喵彩票信息助手', '新闻罐头', 'Wi-Fi'], maxBytes),
             
             // 策略3: 保留最有特色的部分
-            () => this.buildTitleFromParts(title, ['两脚兽教授', '本喵喵酱', 'Wi-Fi尾巴天线'], maxBytes),
+            () => this.buildTitleFromParts(title, ['两脚兽教授', '本喵彩票信息助手', 'Wi-Fi尾巴天线'], maxBytes),
             
             // 策略4: 简化版本
             () => this.buildTitleFromParts(title, ['喵呜~', '今天', '新闻'], maxBytes)
@@ -475,7 +657,7 @@ class WechatService {
         }
         
         // 提取特色词汇
-        const specialWords = ['喵呜', '喵喵酱', '两脚兽', '新闻罐头', 'Wi-Fi', '小鱼干'];
+        const specialWords = ['喵呜', '喵彩票信息助手', '两脚兽', '新闻罐头', 'Wi-Fi', '小鱼干'];
         for (const word of specialWords) {
             if (title.includes(word) && keywords.length < 3) {
                 keywords.push(word);
@@ -541,6 +723,14 @@ class WechatService {
      * @returns {Object} 解析后的文章数据
      */
     parseArticle(article) {
+        // 处理undefined或null的文章内容
+        if (!article) {
+            return {
+                title: '默认文章标题',
+                content: '暂无文章内容'
+            };
+        }
+        
         const lines = article.split('\n');
         let title = '';
         let content = '';
@@ -562,6 +752,80 @@ class WechatService {
         }
         
         return { title, content };
+    }
+
+    /**
+     * 生成彩票开奖信息图片
+     * @param {Object} lotteryData 彩票数据
+     * @returns {Promise<string>} 图片路径
+     */
+    async generateLotteryImage(lotteryData) {
+        try {
+            // 确保目录存在
+            const imageDir = path.join(__dirname, '../images');
+            if (!fs.existsSync(imageDir)) {
+                fs.mkdirSync(imageDir, { recursive: true });
+            }
+
+            // 获取最新一期彩票数据
+            const latest = lotteryData[0];
+            if (!latest) {
+                throw new Error('没有彩票数据');
+            }
+
+            // 创建图片
+            const width = 800;
+            const height = 600;
+            
+            // 创建canvas
+            const canvas = createCanvas(width, height);
+            const ctx = canvas.getContext('2d');
+            
+            // 设置背景色为白色
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, width, height);
+            
+            // 设置文字样式
+            ctx.fillStyle = '#000000';
+            ctx.font = '32px sans-serif';
+            
+            // 添加标题
+            const title = `双色球第${latest.issue}期开奖结果`;
+            ctx.font = 'bold 36px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(title, width / 2, 70);
+            
+            // 设置文字左对齐
+            ctx.textAlign = 'left';
+            ctx.font = '32px sans-serif';
+            
+            // 添加开奖日期
+            const dateText = `开奖日期: ${latest.draw_date}`;
+            ctx.fillText(dateText, 100, 150);
+            
+            // 添加红球
+            const redBallsText = `红球: ${latest.red_balls.join(' ')}`;
+            ctx.fillText(redBallsText, 100, 250);
+            
+            // 添加蓝球
+            const blueBallText = `蓝球: ${latest.blue_balls}`;
+            ctx.fillText(blueBallText, 100, 350);
+            
+            // 添加奖池信息
+            const poolText = `奖池: ${latest.pool_money}元`;
+            ctx.fillText(poolText, 100, 450);
+
+            // 保存图片
+            const imagePath = path.join(imageDir, `lottery_${latest.issue}.png`);
+            const buffer = canvas.toBuffer('image/png');
+            fs.writeFileSync(imagePath, buffer);
+
+            console.log(`彩票图片已生成: ${imagePath}`);
+            return imagePath;
+        } catch (error) {
+            console.error('生成彩票图片失败:', error);
+            throw error;
+        }
     }
 }
 

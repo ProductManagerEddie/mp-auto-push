@@ -13,23 +13,37 @@ class AIService {
 
     /**
      * 生成公众号文章
-     * @param {string} newsContent 新闻内容
+     * @param {string} lotteryContent 彩票内容
+     * @param {string} lotteryType 彩票类型（ssq, kl8, qlc, 3d）
      * @returns {Promise<string>} 生成的文章内容
      */
-    async generateArticle(newsContent) {
+    async generateArticle(lotteryContent, lotteryType = 'ssq') {
         try {
             console.log('正在调用元宝AI生成文章...');
             
-            const prompt = `请根据以下新闻内容，生成一篇适合微信公众号发布的文章。要求：
-1. 标题要吸引人，简洁明了
-2. 内容要有条理，分段清晰
-3. 语言要生动有趣，适合大众阅读
-4. 可以适当添加一些评论和观点
+            // 彩票类型映射
+            const lotteryTypeNameMap = {
+                'ssq': '双色球',
+                'kl8': '快乐8',
+                'qlc': '七乐彩',
+                '3d': '福彩3D'
+            };
+            
+            const lotteryTypeName = lotteryTypeNameMap[lotteryType] || '彩票';
+            
+            const prompt = `请根据以下${lotteryTypeName}开奖数据，生成一篇适合微信公众号发布的${lotteryTypeName}分析文章。要求：
+1. 标题要吸引人，简洁明了，包含${lotteryTypeName}和开奖信息
+2. 内容要有条理，分段清晰，包含开奖结果、数据分析、趋势解读
+3. 语言要生动有趣，适合大众阅读，避免过于专业的术语
+4. 可以适当添加一些评论和观点，如号码特点、冷热分析等
 5. 文章结构要完整，包含开头、正文和结尾
-6. 字数控制在800-1500字之间
+6. 字数控制在300-500字之间
+7. 可以添加一些购彩小贴士或理性购彩提醒
+8. 严格按照${lotteryTypeName}的特点和规则进行分析
+9. 文章排版要统一，包含标题、正文、分段等
 
-新闻内容：
-${newsContent}`;
+${lotteryTypeName}数据：
+${lotteryContent}`;
 
             const requestData = {
                 assistant_id: this.assistantId,

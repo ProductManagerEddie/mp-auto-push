@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const NewsService = require('./newsService');
+const LotteryService = require('./lotteryService');
 const AIService = require('./aiService');
 const WeChatService = require('./wechatService');
 const { logger } = require('./logger');
@@ -12,7 +12,7 @@ const path = require('path');
  */
 class AutoPushApp {
     constructor(options = {}) {
-        this.newsService = new NewsService();
+        this.lotteryService = new LotteryService();
         this.aiService = new AIService();
         this.wechatService = new WeChatService();
         this.isServiceMode = options.serviceMode || false;
@@ -50,119 +50,240 @@ class AutoPushApp {
 
     /**
      * 执行完整的推送流程
+     * @param {Object} options 推送选项
+     * @param {string} options.taskId 任务ID（可选）
+     * @returns {Promise<Object>} 推送结果
      */
-    async run() {
-        try {
-            const logInfo = this.isServiceMode ? logger.info.bind(logger) : console.log;
-            // 移除未使用的 logError 声明
-            
-            logInfo('=== 微信公众号自动推送开始 ===');
-            logInfo('时间:', new Date().toLocaleString());
-            
-            // 步骤1: 获取最新新闻
-            logInfo('\n步骤1: 获取最新新闻');
-            const newsData = await this.newsService.getLatestNews();
-            const formattedNews = this.newsService.formatNewsForAI(newsData);
-            
-            // 步骤2: 生成文章
-            logInfo('\n步骤2: 调用AI生成文章');
-            const article = await this.aiService.generateArticle(formattedNews);
-            
-            // 步骤3: 解析文章
-            logInfo('\n步骤3: 解析文章内容');
-            const { title, content } = this.wechatService.parseArticle(article);
-            logInfo('文章标题:', title);
-            logInfo('文章长度:', content.length, '字符');
-            
-            // 步骤4: 推送到微信公众号草稿箱
-            logInfo('\n步骤4: 推送到微信公众号');
-            const articleData = {
-                title: title,
-                content: content,
-                author: '喵酱',
-                digest: `${newsData.date} 今日新闻速览`,
-                imageUrl: newsData.image || newsData.cover,
-                sourceUrl: newsData.link
-            };
-            
-            // 检查微信配置
-            if (!process.env.WECHAT_APP_ID || !process.env.WECHAT_APP_SECRET) {
-                logInfo('⚠️  微信公众号配置未设置，跳过推送步骤');
-                logInfo('请在.env文件中设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET');
-            } else {
-                // 推送到微信公众号
-                const mediaId = await this.wechatService.createDraft(articleData);
-                logInfo('✅ 文章已成功推送到微信公众号草稿箱');
-                logInfo('草稿ID:', mediaId);
+    async run(options = {}) {
+        // 重试次数配置
+        const MAX_RETRIES = 3;
+        let retryCount = 0;
+        
+        while (retryCount <= MAX_RETRIES) {
+            try {
+                const logInfo = this.isServiceMode ? logger.info.bind(logger) : console.log;
                 
-                // 检查是否需要自动发布
-                const autoPublish = process.env.AUTO_PUBLISH === 'true';
-                if (autoPublish) {
-                    logInfo('🚀 开始自动发布文章...');
+                logInfo('=== 微信公众号自动推送开始 ===');
+                logInfo('时间:', new Date().toLocaleString());
+                logInfo('任务ID:', options.taskId || 'manual');
+                
+                // 获取当天日期（格式：YYYY-MM-DD）
+                const today = new Date().toISOString().split('T')[0];
+                logInfo('当天日期:', today);
+                
+                // 定义需要推送的彩票类型（固定顺序）
+                const lotteryTypes = [
+                    { code: 'ssq', name: '双色球' },
+                    { code: 'kl8', name: '快乐8' },
+                    { code: 'qlc', name: '七乐彩' },
+                    { code: '3d', name: '福彩3D' }
+                ];
+                
+                // 用于存放当天开奖的文章数据
+                const articlesData = [];
+                const allLotteryData = {};
+                const allArticleData = [];
+                
+                // 步骤1-3: 为每种彩票类型获取数据、生成文章、解析文章
+                for (const lotteryType of lotteryTypes) {
+                    logInfo(`\n=== ${lotteryType.name} 处理开始 ===`);
+                    
+                    // 步骤1: 获取最新彩票数据
+                    logInfo(`\n步骤1: 获取最新${lotteryType.name}数据`);
+                    const lotteryData = await this.lotteryService.getLatestLotteryData(lotteryType.code);
+                    allLotteryData[lotteryType.code] = lotteryData;
+                    
+                    // 检查是否有当天开奖的数据
+                    const todayLotteryData = lotteryData.filter(item => item.draw_date === today);
+                    
+                    if (todayLotteryData.length === 0) {
+                        logInfo(`ℹ️  当天${lotteryType.name}无开奖信息，跳过处理`);
+                        logInfo(`=== ${lotteryType.name} 处理完成 (无当天开奖信息) ===`);
+                        continue;
+                    }
+                    
+                    // 只使用当天开奖的数据
+                    const formattedLottery = this.lotteryService.formatLotteryForAI(todayLotteryData);
+                    
+                    // 步骤2: 生成文章
+                    logInfo(`\n步骤2: 调用AI生成${lotteryType.name}文章`);
+                    const article = await this.aiService.generateArticle(formattedLottery, lotteryType.code);
+                    
+                    // 步骤3: 解析文章
+                    logInfo(`\n步骤3: 解析${lotteryType.name}文章内容`);
+                    let { title, content } = this.wechatService.parseArticle(article);
+                    
+                    // 获取最新一期彩票数据的期号
+                    const latestIssue = todayLotteryData[0].issue;
+                    
+                    // 生成统一格式的标题: 【彩票类型】开奖结果第【开奖期号】期中奖号码
+                    const standardizedTitle = `【${lotteryType.name}】开奖结果第${latestIssue}期中奖号码`;
+                    
+                    logInfo(`${lotteryType.name}文章标题:`, standardizedTitle);
+                    logInfo(`${lotteryType.name}文章长度:`, content.length, '字符');
+                    
+                    // 构建文章数据
+                    const articleData = {
+                        title: standardizedTitle,
+                        content: content,
+                        author: '彩票信息助手',
+                        digest: `${today} ${lotteryType.name}开奖信息`,
+                        sourceUrl: ''
+                    };
+                    
+                    allArticleData.push({ articleData, lotteryDate: today });
+                    
+                    // 添加到文章数据数组，用于创建草稿
+                    articlesData.push({
+                        articleData: articleData,
+                        lotteryData: todayLotteryData,
+                        lotteryType: lotteryType.code // 添加彩票类型标识
+                    });
+                    
+                    logInfo(`=== ${lotteryType.name} 处理完成 ===`);
+                }
+                
+                // 检查是否有当天开奖的彩票信息
+                if (articlesData.length === 0) {
+                    logInfo('\nℹ️  当天所有彩票均无开奖信息，不生成草稿文章');
+                    logInfo('\n=== 推送流程完成 ===');
+                    
+                    // 返回结果
+                    return {
+                        success: true,
+                        taskId: options.taskId || 'manual',
+                        lotteryData: allLotteryData,
+                        articles: [],
+                        mediaId: null,
+                        publishResult: null,
+                        publishStatus: null,
+                        timestamp: new Date().toISOString(),
+                        retries: retryCount,
+                        error: null,
+                        message: '当天所有彩票均无开奖信息，不生成草稿文章'
+                    };
+                }
+                
+                // 步骤4: 推送到微信公众号草稿箱
+                logInfo(`\n=== 所有当天开奖彩票处理完成，共${articlesData.length}种彩票有开奖信息，开始创建草稿 ===`);
+                logInfo('\n步骤4: 推送到微信公众号');
+                
+                let mediaId = null;
+                let publishResult = null;
+                let publishStatus = null;
+                let pushErrorDetails = null;
+                
+                // 检查微信配置
+                if (!process.env.WECHAT_APP_ID || !process.env.WECHAT_APP_SECRET) {
+                    logInfo('⚠️  微信公众号配置未设置，跳过推送步骤');
+                    logInfo('请在.env文件中设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET');
+                } else {
                     try {
-                        const publishResult = await this.wechatService.publishDraft(mediaId);
-                        logInfo('✅ 文章发布请求已提交');
-                        logInfo('发布任务ID:', publishResult.publish_id);
+                        // 推送到微信公众号草稿箱
+                        mediaId = await this.wechatService.createDraft(articlesData);
+                        logInfo('✅ 文章已成功推送到微信公众号草稿箱');
+                        logInfo('草稿ID:', mediaId);
                         
-                        // 检查是否需要查询发布状态
-                        const checkStatus = process.env.CHECK_PUBLISH_STATUS !== 'false';
-                        if (checkStatus) {
-                            logInfo('⏳ 等待3秒后查询发布状态...');
-                            await new Promise(resolve => setTimeout(resolve, 3000));
+                        // 检查是否需要自动发布
+                        const autoPublish = options.autoPublish !== undefined ? options.autoPublish : process.env.AUTO_PUBLISH === 'true';
+                        if (autoPublish) {
+                            logInfo('🚀 开始自动发布文章...');
+                            publishResult = await this.wechatService.publishDraft(mediaId);
+                            logInfo('✅ 文章发布请求已提交');
+                            logInfo('发布任务ID:', publishResult.publish_id);
                             
-                            const statusResult = await this.wechatService.getPublishStatus(publishResult.publish_id);
-                            const statusText = this.wechatService.getPublishStatusText(statusResult.publish_status);
-                            logInfo(`📊 发布状态: ${statusText}`);
-                            
-                            if (statusResult.publish_status === 0) {
-                                logInfo('🎉 文章发布成功！');
-                                if (statusResult.article_detail && statusResult.article_detail.url) {
-                                    logInfo('📖 文章链接:', statusResult.article_detail.url);
-                                }
-                            } else if (statusResult.publish_status === 1) {
-                                logInfo('⏳ 文章正在发布中，请稍后查看公众号');
-                            } else {
-                                logInfo('❌ 文章发布失败，请检查内容是否符合微信规范');
-                                if (statusResult.fail_idx && statusResult.fail_idx.length > 0) {
-                                    logInfo('失败详情:', statusResult.fail_idx);
+                            // 检查是否需要查询发布状态
+                            const checkStatus = options.checkPublishStatus !== undefined ? options.checkPublishStatus : process.env.CHECK_PUBLISH_STATUS !== 'false';
+                            if (checkStatus) {
+                                logInfo('⏳ 等待3秒后查询发布状态...');
+                                await new Promise(resolve => setTimeout(resolve, 3000));
+                                
+                                publishStatus = await this.wechatService.getPublishStatus(publishResult.publish_id);
+                                const statusText = this.wechatService.getPublishStatusText(publishStatus.status);
+                                logInfo(`📊 发布状态: ${statusText}`);
+                                
+                                if (publishStatus.status === 0) {
+                                    logInfo('🎉 文章发布成功！');
+                                    if (publishStatus.articleUrl) {
+                                        logInfo('📖 文章链接:', publishStatus.articleUrl);
+                                    }
+                                } else if (publishStatus.status === 1) {
+                                    logInfo('⏳ 文章正在发布中，请稍后查看公众号');
+                                } else {
+                                    logInfo('❌ 文章发布失败，请检查内容是否符合微信规范');
+                                    if (publishStatus.failReason) {
+                                        logInfo('失败详情:', publishStatus.failReason);
+                                    }
                                 }
                             }
+                        } else {
+                            logInfo('💡 自动发布已关闭，文章已保存为草稿');
+                            logInfo('如需自动发布，请在.env文件中设置 AUTO_PUBLISH=true');
                         }
-                    } catch (publishError) {
-                        logInfo('❌ 自动发布失败:', publishError.message);
-                        logInfo('💡 文章已保存为草稿，您可以手动发布');
+                    } catch (pushError) {
+                        logInfo('❌ 微信推送失败:', pushError.message);
+                        if (pushError.stack) {
+                            logInfo('错误堆栈:', pushError.stack);
+                        }
+                        logInfo('💡 文章将保存到本地文件作为备份');
+                        // 将错误信息添加到结果中，以便记录到历史
+                        pushErrorDetails = {
+                            message: pushError.message,
+                            stack: pushError.stack
+                        };
                     }
-                } else {
-                    logInfo('💡 自动发布已关闭，文章已保存为草稿');
-                    logInfo('如需自动发布，请在.env文件中设置 AUTO_PUBLISH=true');
                 }
+                
+                // 无论是否推送微信，都保存所有当天开奖的文章到本地文件作为备份
+                for (const { articleData, lotteryDate } of allArticleData) {
+                    await this.saveArticleToFile(articleData, lotteryDate);
+                }
+                
+                logInfo('\n=== 推送流程完成 ===');
+                
+                // 返回完整的结果
+                return {
+                    success: true,
+                    taskId: options.taskId || 'manual',
+                    lotteryData: allLotteryData,
+                    articles: allArticleData.map(item => item.articleData),
+                    mediaId: mediaId,
+                    publishResult: publishResult,
+                    publishStatus: publishStatus,
+                    timestamp: new Date().toISOString(),
+                    retries: retryCount,
+                    error: pushErrorDetails || null,
+                    message: `成功处理${articlesData.length}种彩票的开奖信息`
+                };
+                
+            } catch (error) {
+                retryCount++;
+                const logError = this.isServiceMode ? logger.error.bind(logger) : console.error;
+                logError(`\n❌ 推送流程失败 (第${retryCount}次尝试):`, error.message);
+                
+                if (this.isServiceMode) {
+                    logger.error('错误详情:', error);
+                } else {
+                    console.error('错误详情:', error);
+                }
+                
+                // 如果达到最大重试次数，返回失败结果
+                if (retryCount > MAX_RETRIES) {
+                    logError(`\n❌ 推送流程最终失败，已重试${MAX_RETRIES}次`);
+                    return {
+                        success: false,
+                        taskId: options.taskId || 'manual',
+                        error: error.message,
+                        timestamp: new Date().toISOString(),
+                        retries: retryCount - 1
+                    };
+                }
+                
+                // 等待一段时间后重试
+                const delay = Math.pow(2, retryCount) * 1000; // 指数退避策略
+                logError(`⏳ 将在${delay}ms后重试...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
-            
-            // 无论是否推送微信，都保存文章到本地文件作为备份
-            await this.saveArticleToFile(articleData, newsData.date);
-            
-            logInfo('\n=== 推送流程完成 ===');
-            return {
-                success: true,
-                newsData,
-                article: articleData,
-                timestamp: new Date().toISOString()
-            };
-            
-        } catch (error) {
-            const logError = this.isServiceMode ? logger.error.bind(logger) : console.error;
-            logError('\n❌ 推送流程失败:', error.message);
-            if (this.isServiceMode) {
-                logger.error('错误详情:', error);
-            } else {
-                console.error('错误详情:', error);
-            }
-            
-            return {
-                success: false,
-                error: error.message,
-                timestamp: new Date().toISOString()
-            };
         }
     }
 
@@ -193,7 +314,7 @@ class AutoPushApp {
             const content = `# ${articleData.title}
 
 **📅 发布日期:** ${date}
-**👤 作者:** ${articleData.author || '喵酱'}
+**👤 作者:** ${articleData.author || '彩票信息助手'}
 **📝 摘要:** ${articleData.digest || ''}
 **🔗 来源链接:** ${articleData.sourceUrl || ''}
 **⏰ 保存时间:** ${now.toLocaleString('zh-CN')}
