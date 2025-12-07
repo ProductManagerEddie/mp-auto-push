@@ -24,8 +24,16 @@ class Scheduler {
 
         scheduleLogger.info('启动定时任务调度器');
         
-        // 每天8点执行推送任务
-        const dailyTask = cron.schedule('0 8 * * *', async () => {
+        // 每天8:30执行彩票数据预加载任务
+        const preloadTask = cron.schedule('30 8 * * *', async () => {
+            await this.executePreloadTask();
+        }, {
+            scheduled: false,
+            timezone: process.env.TIMEZONE || 'Asia/Shanghai'
+        });
+
+        // 每天9点执行推送任务
+        const dailyTask = cron.schedule('0 9 * * *', async () => {
             await this.executePushTask();
         }, {
             scheduled: false,
@@ -53,6 +61,7 @@ class Scheduler {
         });
 
         // 启动任务
+        preloadTask.start();
         dailyTask.start();
         healthCheckTask.start();
         
@@ -62,13 +71,15 @@ class Scheduler {
             scheduleLogger.info('测试任务已启动（开发模式）');
         }
 
+        this.tasks.set('preload', preloadTask);
         this.tasks.set('daily', dailyTask);
         this.tasks.set('health', healthCheckTask);
         
         this.isRunning = true;
         
         scheduleLogger.info('定时任务已启动:');
-        scheduleLogger.info('- 每日推送: 每天8:00');
+        scheduleLogger.info('- 彩票数据预加载: 每天8:30');
+        scheduleLogger.info('- 每日推送: 每天9:00');
         scheduleLogger.info('- 健康检查: 每小时');
         if (process.env.NODE_ENV === 'development') {
             scheduleLogger.info('- 测试任务: 每分钟（开发模式）');
@@ -97,6 +108,45 @@ class Scheduler {
         scheduleLogger.info('所有定时任务已停止');
     }
 
+    /**
+     * 执行彩票数据预加载任务
+     */
+    async executePreloadTask() {
+        scheduleLogger.info('开始执行彩票数据预加载任务');
+        
+        try {
+            // 支持的彩票类型
+            const lotteryTypes = ['ssq', 'kl8', 'qlc', '3d'];
+            const lotteryTypeNameMap = {
+                'ssq': '双色球',
+                'kl8': '快乐8',
+                'qlc': '七乐彩',
+                '3d': '福彩3D'
+            };
+            
+            scheduleLogger.info(`预加载以下彩票类型数据: ${lotteryTypes.map(type => lotteryTypeNameMap[type]).join(', ')}`);
+            
+            // 预加载每种彩票类型的数据
+            for (const type of lotteryTypes) {
+                scheduleLogger.info(`预加载${lotteryTypeNameMap[type]}数据...`);
+                
+                try {
+                    const lotteryData = await this.app.lotteryService.getLatestLotteryData(type);
+                    scheduleLogger.info(`成功预加载${lotteryTypeNameMap[type]}数据，共${lotteryData.length}条记录`);
+                } catch (error) {
+                    scheduleLogger.error(`预加载${lotteryTypeNameMap[type]}数据失败:`, error.message);
+                }
+            }
+            
+            scheduleLogger.info('彩票数据预加载任务执行完成');
+            return true;
+            
+        } catch (error) {
+            scheduleLogger.error('彩票数据预加载任务异常:', error);
+            return false;
+        }
+    }
+    
     /**
      * 执行推送任务
      */

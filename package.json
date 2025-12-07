@@ -1,7 +1,7 @@
 {
   "name": "mp-auto-push",
   "version": "1.0.0",
-  "description": "微信公众号文章自动推送工具 - 获取60s新闻，通过元宝AI生成文章，自动推送到微信公众号草稿箱",
+  "description": "微信公众号彩票信息自动推送工具 - 获取彩票数据，通过元宝AI生成文章，自动推送到微信公众号草稿箱",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -28,7 +28,7 @@
     "wechat",
     "mp",
     "auto-push",
-    "news",
+    "lottery",
     "ai",
     "yuanbao"
   ],

@@ -137,9 +137,8 @@ class WechatService {
                 console.log(`使用smart模式处理标题: ${title}`);
                 const validatedTitle = this.validateAndTruncateTitle(title, 'smart');
                 
-                // 将markdown格式的内容转换为HTML格式
-                console.log('正在将Markdown内容转换为HTML格式...');
-                const htmlContent = this.convertMarkdownToHtml(content);
+                // 使用已经转换好的HTML格式内容
+                const htmlContent = content;
                 
                 let thumbMediaId = '';
 
@@ -715,6 +714,117 @@ class WechatService {
         // 重置token
         this.accessToken = null;
         this.tokenExpireTime = 0;
+    }
+    
+    /**
+     * 获取素材列表
+     * @param {string} type 素材类型，默认为image
+     * @param {number} offset 偏移量，默认为0
+     * @param {number} count 获取数量，默认为20
+     * @returns {Promise<Object>} 素材列表
+     */
+    async getMaterialList(type = 'image', offset = 0, count = 20) {
+        try {
+            console.log(`正在获取${type}类型的素材列表...`);
+            const accessToken = await this.getAccessToken();
+            
+            const response = await axios.post(`https://api.weixin.qq.com/cgi-bin/material/batchget_material?access_token=${accessToken}`, {
+                type,
+                offset,
+                count
+            }, {
+                timeout: 10000,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.data && response.data.item) {
+                console.log(`成功获取${response.data.item.length}条${type}素材`);
+                return response.data.item;
+            } else {
+                console.log('没有获取到素材或返回格式错误:', response.data);
+                return [];
+            }
+        } catch (error) {
+            console.error('获取素材列表失败:', error.message);
+            return [];
+        }
+    }
+    
+    /**
+     * 删除素材
+     * @param {string} mediaId 素材ID
+     * @returns {Promise<boolean>} 删除结果
+     */
+    async deleteMaterial(mediaId) {
+        try {
+            console.log(`正在删除素材: ${mediaId}...`);
+            const accessToken = await this.getAccessToken();
+            
+            const response = await axios.post(`https://api.weixin.qq.com/cgi-bin/material/del_material?access_token=${accessToken}`, {
+                media_id: mediaId
+            }, {
+                timeout: 10000,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.data && response.data.errcode === 0) {
+                console.log(`素材删除成功: ${mediaId}`);
+                return true;
+            } else {
+                console.error(`素材删除失败: ${mediaId}，错误码: ${response.data.errcode}，错误信息: ${response.data.errmsg}`);
+                return false;
+            }
+        } catch (error) {
+            console.error(`删除素材时发生错误: ${mediaId}`, error.message);
+            return false;
+        }
+    }
+    
+    /**
+     * 删除昨天上传的素材
+     * @returns {Promise<number>} 删除的素材数量
+     */
+    async deleteYesterdayMaterials() {
+        try {
+            console.log('开始删除昨天上传的素材...');
+            
+            // 计算昨天的日期
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayDateStr = yesterday.toISOString().split('T')[0];
+            
+            console.log(`删除${yesterdayDateStr}上传的素材`);
+            
+            // 获取所有图片素材
+            const materials = await this.getMaterialList('image', 0, 100);
+            
+            let deletedCount = 0;
+            
+            // 遍历素材，删除昨天上传的素材
+            for (const material of materials) {
+                // 获取素材创建时间
+                const createTime = new Date(material.update_time * 1000);
+                const createDateStr = createTime.toISOString().split('T')[0];
+                
+                // 检查是否是昨天上传的素材
+                if (createDateStr === yesterdayDateStr) {
+                    const success = await this.deleteMaterial(material.media_id);
+                    if (success) {
+                        deletedCount++;
+                    }
+                }
+            }
+            
+            console.log(`成功删除${deletedCount}条昨天上传的素材`);
+            return deletedCount;
+        } catch (error) {
+            console.error('删除昨天素材时发生错误:', error.message);
+            return 0;
+        }
     }
 
     /**

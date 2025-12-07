@@ -71,6 +71,13 @@ class AutoPushApp {
                 const today = new Date().toISOString().split('T')[0];
                 logInfo('当天日期:', today);
                 
+                // 删除昨天上传的素材
+                if (process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET) {
+                    logInfo('\n步骤0: 删除昨天上传的素材');
+                    const deletedCount = await this.wechatService.deleteYesterdayMaterials();
+                    logInfo(`✅ 成功删除${deletedCount}条昨天上传的素材`);
+                }
+                
                 // 定义需要推送的彩票类型（固定顺序）
                 const lotteryTypes = [
                     { code: 'ssq', name: '双色球' },
@@ -122,10 +129,13 @@ class AutoPushApp {
                     logInfo(`${lotteryType.name}文章标题:`, standardizedTitle);
                     logInfo(`${lotteryType.name}文章长度:`, content.length, '字符');
                     
+                    // 将markdown格式的内容转换为HTML格式（与推送文章保持一致）
+                    const htmlContent = this.wechatService.convertMarkdownToHtml(content);
+                    
                     // 构建文章数据
                     const articleData = {
                         title: standardizedTitle,
-                        content: content,
+                        content: htmlContent, // 使用HTML格式内容
                         author: '彩票信息助手',
                         digest: `${today} ${lotteryType.name}开奖信息`,
                         sourceUrl: ''
