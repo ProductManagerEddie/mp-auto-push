@@ -17,12 +17,17 @@ class AutoPushApp {
         this.wechatService = new WeChatService();
         this.isServiceMode = options.serviceMode || false;
         
-        // 配置AI服务
-        if (process.env.YUANBAO_TOKEN && process.env.YUANBAO_USER_ID) {
-            this.aiService.setToken(process.env.YUANBAO_TOKEN);
-            this.aiService.setUserId(process.env.YUANBAO_USER_ID);
+        // 配置AI服务（智谱智能体）
+        if (process.env.ZHIPU_API_KEY) {
+            this.aiService.setToken(process.env.ZHIPU_API_KEY);
+            if (process.env.ZHIPU_APP_ID) {
+                this.aiService.setAppId(process.env.ZHIPU_APP_ID);
+            }
+            if (process.env.ZHIPU_USER_ID) {
+                this.aiService.setUserId(process.env.ZHIPU_USER_ID);
+            }
         } else {
-            const message = '错误: 请在.env文件中配置YUANBAO_TOKEN和YUANBAO_USER_ID';
+            const message = '错误: 请在.env文件中配置ZHIPU_API_KEY';
             if (this.isServiceMode) {
                 logger.error(message);
                 throw new Error(message);
@@ -67,9 +72,16 @@ class AutoPushApp {
                 logInfo('时间:', new Date().toLocaleString());
                 logInfo('任务ID:', options.taskId || 'manual');
                 
-                // 获取当天日期（格式：YYYY-MM-DD）
-                const today = new Date().toISOString().split('T')[0];
-                logInfo('当天日期:', today);
+                // 获取前一天日期（格式：YYYY-MM-DD）
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayDate = yesterday.toISOString().split('T')[0];
+                logInfo('推送日期:', yesterdayDate);
+                logInfo('推送内容: 前一天的完整开奖信息');
+                logInfo('当前系统日期:', new Date().toISOString().split('T')[0]);
+                
+                // 为了兼容后续代码，将yesterdayDate赋值给today变量
+                const today = yesterdayDate;
                 
                 // 删除昨天上传的素材
                 if (process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET) {
@@ -96,21 +108,39 @@ class AutoPushApp {
                     logInfo(`\n=== ${lotteryType.name} 处理开始 ===`);
                     
                     // 步骤1: 获取最新彩票数据
-                    logInfo(`\n步骤1: 获取最新${lotteryType.name}数据`);
+                    logInfo(`
+步骤1: 获取最新${lotteryType.name}数据`);
                     const lotteryData = await this.lotteryService.getLatestLotteryData(lotteryType.code);
                     allLotteryData[lotteryType.code] = lotteryData;
                     
-                    // 检查是否有当天开奖的数据
-                    const todayLotteryData = lotteryData.filter(item => item.draw_date === today);
-                    
-                    if (todayLotteryData.length === 0) {
-                        logInfo(`ℹ️  当天${lotteryType.name}无开奖信息，跳过处理`);
-                        logInfo(`=== ${lotteryType.name} 处理完成 (无当天开奖信息) ===`);
-                        continue;
+                    // 调试日志：打印彩票数据的日期范围
+                    if (lotteryData && lotteryData.length > 0) {
+                        const firstDate = lotteryData[0].draw_date;
+                        const lastDate = lotteryData[lotteryData.length - 1].draw_date;
+                        logInfo(`${lotteryType.name}数据日期范围: ${lastDate} 至 ${firstDate}`);
+                        logInfo(`${lotteryType.name}数据示例:`, lotteryData[0].draw_date, lotteryData[0].issue);
                     }
                     
-                    // 只使用当天开奖的数据
-                    const formattedLottery = this.lotteryService.formatLotteryForAI(todayLotteryData);
+                    // 检查是否有前一天开奖的数据
+                    let targetLotteryData = lotteryData.filter(item => item.draw_date === today);
+                    
+                    // 如果没有前一天的数据，使用最新的一期数据
+                    if (targetLotteryData.length === 0) {
+                        if (lotteryData.length > 0) {
+                            // 使用最新的一期数据
+                            targetLotteryData = [lotteryData[0]];
+                            logInfo(`ℹ️  前一天${lotteryType.name}无开奖信息，使用最新一期数据: ${targetLotteryData[0].draw_date} ${targetLotteryData[0].issue}`);
+                        } else {
+                            logInfo(`ℹ️  ${lotteryType.name}无任何开奖信息，跳过处理`);
+                            logInfo(`=== ${lotteryType.name} 处理完成 (无开奖信息) ===`);
+                            continue;
+                        }
+                    } else {
+                        logInfo(`✅ 找到${targetLotteryData.length}条${lotteryType.name}开奖信息: ${today}`);
+                    }
+                    
+                    // 使用目标开奖数据（前一天或最新一期）
+                    const formattedLottery = this.lotteryService.formatLotteryForAI(targetLotteryData);
                     
                     // 步骤2: 生成文章
                     logInfo(`\n步骤2: 调用AI生成${lotteryType.name}文章`);
@@ -121,7 +151,7 @@ class AutoPushApp {
                     let { title, content } = this.wechatService.parseArticle(article);
                     
                     // 获取最新一期彩票数据的期号
-                    const latestIssue = todayLotteryData[0].issue;
+                    const latestIssue = targetLotteryData[0].issue;
                     
                     // 生成统一格式的标题: 【彩票类型】开奖结果第【开奖期号】期中奖号码
                     const standardizedTitle = `【${lotteryType.name}】开奖结果第${latestIssue}期中奖号码`;
@@ -146,7 +176,7 @@ class AutoPushApp {
                     // 添加到文章数据数组，用于创建草稿
                     articlesData.push({
                         articleData: articleData,
-                        lotteryData: todayLotteryData,
+                        lotteryData: targetLotteryData,
                         lotteryType: lotteryType.code // 添加彩票类型标识
                     });
                     
@@ -398,8 +428,9 @@ if (require.main === module) {
   npm run config         # 显示配置说明
 
 环境变量配置:
-  YUANBAO_TOKEN         # 元宝AI的访问令牌 (必需)
-  YUANBAO_USER_ID       # 元宝AI的用户ID (必需)
+  ZHIPU_API_KEY         # 智谱智能体的API密钥 (必需)
+  ZHIPU_APP_ID          # 智谱智能体的应用ID (必需)
+  ZHIPU_USER_ID         # 智谱智能体的用户ID (可选)
   WECHAT_APP_ID         # 微信公众号AppID (可选)
   WECHAT_APP_SECRET     # 微信公众号AppSecret (可选)
 
@@ -427,11 +458,12 @@ if (require.main === module) {
         console.log(`
 配置说明:
 
-1. 元宝AI配置 (必需):
-   - 访问 https://yuanbao.tencent.com/ 获取API访问权限
+1. 智谱智能体配置 (必需):
+   - 访问 https://zhipu-ai.feishu.cn/wiki/Wsr1wXmHXicO3AkdZPVcBANbnvb 获取API访问权限
    - 在.env文件中设置:
-     YUANBAO_TOKEN=your_token_here
-     YUANBAO_USER_ID=your_user_id_here
+     ZHIPU_API_KEY=your_zhipu_api_key_here
+     ZHIPU_APP_ID=your_zhipu_application_id_here
+     ZHIPU_USER_ID=your_user_id_here (可选)
 
 2. 微信公众号配置 (可选):
    - 登录微信公众平台 https://mp.weixin.qq.com/

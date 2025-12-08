@@ -1,14 +1,14 @@
 const axios = require('axios');
 
 /**
- * 元宝AI服务
+ * 智谱AI服务
  */
 class AIService {
     constructor() {
-        this.apiUrl = 'https://yuanqi.tencent.com/openapi/v1/agent/chat/completions';
-        this.assistantId = process.env.YUANBAO_ASSISTANT_ID || 'your_assistant_id_here';
-        this.token = process.env.YUANBAO_TOKEN || 'your_yuanbao_token_here';
-        this.userId = process.env.YUANBAO_USER_ID || 'user_' + Date.now();
+        // 智谱AI标准聊天接口
+        this.apiUrl = process.env.ZHIPU_API_URL || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+        this.token = process.env.ZHIPU_API_KEY || 'your_zhipu_api_key_here';
+        this.model = process.env.ZHIPU_MODEL || 'glm-4-flash'; // 默认使用glm-4-flash模型
     }
 
     /**
@@ -19,7 +19,7 @@ class AIService {
      */
     async generateArticle(lotteryContent, lotteryType = 'ssq') {
         try {
-            console.log('正在调用元宝AI生成文章...');
+            console.log('正在调用智谱AI生成文章...');
             
             // 彩票类型映射
             const lotteryTypeNameMap = {
@@ -31,7 +31,11 @@ class AIService {
             
             const lotteryTypeName = lotteryTypeNameMap[lotteryType] || '彩票';
             
-            const prompt = `请根据以下${lotteryTypeName}开奖数据，生成一篇适合微信公众号发布的${lotteryTypeName}分析文章。要求：
+            // 系统提示
+            const systemPrompt = `你是一个专业的彩票分析员，擅长撰写彩票开奖信息分析文章。`;
+            
+            // 用户请求
+            const userPrompt = `请根据以下${lotteryTypeName}开奖数据，生成一篇适合微信公众号发布的${lotteryTypeName}分析文章。要求：
 1. 标题要吸引人，简洁明了，包含${lotteryTypeName}和开奖信息
 2. 内容要有条理，分段清晰，包含开奖结果、数据分析、趋势解读
 3. 语言要生动有趣，适合大众阅读，避免过于专业的术语
@@ -45,39 +49,42 @@ class AIService {
 ${lotteryTypeName}数据：
 ${lotteryContent}`;
 
+            // 智谱AI标准聊天接口请求格式
             const requestData = {
-                assistant_id: this.assistantId,
-                user_id: this.userId,
-                stream: false,
+                model: this.model,
                 messages: [
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: prompt
-                            }
-                        ]
-                    }
-                ]
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ],
+                temperature: 0.7,
+                top_p: 0.95,
+                max_tokens: 1000,
+                stream: false
             };
 
             const response = await axios.post(this.apiUrl, requestData, {
                 headers: {
-                    'X-Source': 'openapi',
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
                 timeout: 60000
             });
 
-            if (response.data && response.data.choices && response.data.choices.length > 0) {
-                const article = response.data.choices[0].message.content;
-                console.log('文章生成成功');
-                return article;
-            } else {
-                throw new Error('AI返回数据格式错误');
+            console.log('智谱AI完整响应:', JSON.stringify(response.data, null, 2));
+            
+            // 智谱AI标准聊天接口响应解析
+            if (response.data && response.data.choices && Array.isArray(response.data.choices) && response.data.choices.length > 0) {
+                const firstChoice = response.data.choices[0];
+                if (firstChoice.message && firstChoice.message.content) {
+                    console.log('文章生成成功');
+                    return firstChoice.message.content;
+                }
             }
+            
+            // 处理错误响应
+            const errorMsg = response.data?.error?.message || response.data?.message || 'AI返回数据格式错误';
+            console.error('智谱AI响应错误:', response.data);
+            throw new Error(`AI返回数据错误: ${errorMsg}`);
         } catch (error) {
             console.error('生成文章失败:', error.message);
             if (error.response) {
@@ -88,19 +95,51 @@ ${lotteryContent}`;
     }
 
     /**
-     * 设置用户ID
-     * @param {string} userId 用户ID
+     * 设置模型名称
+     * @param {string} model 智谱AI模型名称
      */
-    setUserId(userId) {
-        this.userId = userId;
+    setModel(model) {
+        this.model = model;
     }
 
     /**
-     * 设置Token
-     * @param {string} token API Token
+     * 设置API URL
+     * @param {string} apiUrl 智谱AI API URL
      */
-    setToken(token) {
-        this.token = token;
+    setApiUrl(apiUrl) {
+        this.apiUrl = apiUrl;
+    }
+
+    /**
+     * 设置API Key
+     * @param {string} apiKey 智谱AI API Key
+     */
+    setToken(apiKey) {
+        this.token = apiKey;
+    }
+
+    /**
+     * 设置API Key（别名，保持向后兼容）
+     * @param {string} apiKey 智谱AI API Key
+     */
+    setApiKey(apiKey) {
+        this.token = apiKey;
+    }
+
+    /**
+     * 以下方法为保持向后兼容而保留
+     */
+    setAppId(appId) {
+        console.warn('setAppId方法已废弃，智谱AI标准接口不再需要应用ID');
+        // 不执行任何操作
+    }
+
+    /**
+     * 以下方法为保持向后兼容而保留
+     */
+    setUserId(userId) {
+        console.warn('setUserId方法已废弃，智谱AI标准接口不再需要用户ID');
+        // 不执行任何操作
     }
 }
 

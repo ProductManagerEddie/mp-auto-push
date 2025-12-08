@@ -116,7 +116,7 @@ class WechatService {
 
     /**
      * 创建草稿
-     * @param {Array} articlesData 多篇文章数据数组，必须包含四篇文章，对应四种彩票类型
+     * @param {Array} articlesData 多篇文章数据数组，根据实际获取的开奖信息数量灵活调整
      * @returns {Promise<string>} media_id
      */
     async createDraft(articlesData) {
@@ -220,7 +220,7 @@ class WechatService {
     }
 
     /**
-     * 验证文章数据，确保草稿包含当天开奖的彩票文章，且按固定顺序排列
+     * 验证文章数据，确保每篇文章包含有效的开奖信息
      * @param {Array} articlesData 多篇文章数据数组
      * @throws {Error} 验证失败时抛出错误
      */
@@ -841,14 +841,24 @@ class WechatService {
             };
         }
         
+        // 处理空字符串
+        const trimmedArticle = article.trim();
+        if (!trimmedArticle) {
+            return {
+                title: '默认文章标题',
+                content: '暂无文章内容'
+            };
+        }
+        
         const lines = article.split('\n');
         let title = '';
         let content = '';
         
         // 查找标题（通常是第一行或包含"标题"的行）
-        for (let i = 0; i < Math.min(5, lines.length); i++) {
+        for (let i = 0; i < Math.min(10, lines.length); i++) {
             const line = lines[i].trim();
-            if (line && !line.startsWith('#') && line.length > 5 && line.length < 100) {
+            if (line && line.length > 5 && line.length < 100) {
+                // 接受markdown标题
                 title = line.replace(/^#+\s*/, '').replace(/^标题[:：]\s*/, '');
                 content = lines.slice(i + 1).join('\n').trim();
                 break;
@@ -857,8 +867,13 @@ class WechatService {
         
         // 如果没找到合适的标题，使用默认标题
         if (!title) {
-            title = '今日新闻速览';
-            content = article;
+            title = '今日彩票分析';
+            content = trimmedArticle;
+        }
+        
+        // 确保内容不为空
+        if (!content || content.trim() === '') {
+            content = '暂无详细分析内容，请查看最新开奖结果。';
         }
         
         return { title, content };

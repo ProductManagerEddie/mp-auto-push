@@ -144,12 +144,24 @@ class LotteryService {
         formattedText += `【${latest.issue}期】开奖结果：\n`;
         formattedText += `开奖日期：${latest.draw_date}\n`;
         
+        // 处理不同彩票类型的号码格式
         if (latest.red_balls && latest.red_balls.length > 0) {
+            // 双色球 - 红球+蓝球
             formattedText += `红球号码：${latest.red_balls.join(', ')}\n`;
-        }
-        
-        if (latest.blue_balls) {
-            formattedText += `蓝球号码：${latest.blue_balls}\n`;
+            if (latest.blue_balls) {
+                formattedText += `蓝球号码：${latest.blue_balls}\n`;
+            }
+        } else if (latest.balls && latest.balls.length > 0) {
+            // 快乐8、七乐彩、福彩3D - 普通号码
+            formattedText += `开奖号码：${latest.balls.join(', ')}\n`;
+            // 处理特殊号码（如七乐彩的特别号）
+            if (latest.special_ball) {
+                formattedText += `特别号码：${latest.special_ball}\n`;
+            }
+            // 处理福彩3D的数字格式
+            if (latest.number) {
+                formattedText += `中奖数字：${latest.number}\n`;
+            }
         }
         
         if (latest.sales) {
@@ -222,8 +234,9 @@ class LotteryService {
         
         for (let i = 0; i < count; i++) {
             const date = new Date(today);
-            // 根据彩票类型设置开奖间隔
-            const drawInterval = type === '3d' ? 1 : 3;
+            // 为了测试前一天推送策略，所有彩票类型都使用1天间隔
+            // 实际生产环境中可以恢复为不同类型的开奖间隔
+            const drawInterval = 1;
             date.setDate(date.getDate() - i * drawInterval);
             
             // 生成基本数据
