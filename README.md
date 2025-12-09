@@ -156,14 +156,37 @@ LOTTERY_API_TIMEOUT=10000
 ## 命令行选项
 
 ```bash
+# 直接运行（开发模式）
+npm run dev
+
+# 直接运行（生产模式）
+npm run start
+
 # 显示帮助信息
 npm run help
 
 # 显示配置说明
 npm run config
 
-# 直接运行
-npm run dev
+# 守护进程管理
+npm run daemon              # 显示守护进程帮助
+npm run daemon:start        # 启动守护进程
+npm run daemon:stop         # 停止守护进程
+npm run daemon:restart      # 重启守护进程
+npm run daemon:status       # 查看守护进程状态
+npm run daemon:run          # 直接运行守护进程
+
+# PM2进程管理
+npm run pm2:start           # 使用PM2启动服务
+npm run pm2:stop            # 使用PM2停止服务
+npm run pm2:restart         # 使用PM2重启服务
+npm run pm2:delete          # 使用PM2删除服务
+npm run pm2:logs            # 查看PM2日志
+npm run pm2:status          # 查看PM2状态
+
+# HTTP服务器管理
+npm run server              # 启动HTTP服务器
+npm run server:dev          # 启动HTTP服务器（开发模式）
 ```
 
 ## 测试功能
@@ -212,9 +235,11 @@ mp-auto-push/
 │   ├── aiService.js       # AI文章生成服务
 │   ├── wechatService.js   # 微信公众号服务
 │   ├── logger.js          # 日志记录模块
-├── test/                  # 测试目录
-│   ├── test_draft_creation.js  # 草稿创建功能测试
-│   └── test_date_matching.js   # 日期匹配功能测试
+│   ├── scheduler.js       # 定时任务调度模块
+│   ├── monitor.js         # 监控模块
+│   ├── daemon.js          # 守护进程模块
+│   ├── server.js          # HTTP服务器模块
+│   ├── httpServer.js      # HTTP服务器实现
 ├── images/                # 彩票图片生成目录
 ├── logs/                  # 日志文件目录
 │   ├── app.log           # 应用日志
@@ -224,9 +249,15 @@ mp-auto-push/
 ├── output/                # 本地文章输出目录
 │   └── 2025/              # 按年月分类的文章目录
 │       └── 12/            # 具体月份的文章目录
+├── history/               # 推送历史记录目录
+├── scripts/               # 服务脚本目录
+├── shuangseqiu/           # 双色球数据服务目录
+├── test_draft_creation.js # 草稿创建功能测试
+├── test_date_matching.js  # 日期匹配功能测试
 ├── .env.example           # 环境变量配置示例
 ├── .gitignore            # Git忽略文件
 ├── package.json          # 项目配置
+├── ecosystem.config.js   # PM2配置文件
 └── README.md            # 项目说明
 ```
 

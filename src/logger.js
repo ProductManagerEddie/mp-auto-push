@@ -99,7 +99,38 @@ const scheduleLogger = winston.createLogger({
     ]
 });
 
+/**
+ * 创建专门的监控日志记录器
+ */
+const monitorLogger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.timestamp({
+            format: 'YYYY-MM-DD HH:mm:ss'
+        }),
+        winston.format.printf(({ timestamp, level, message }) => {
+            return `${timestamp} [MONITOR-${level.toUpperCase()}]: ${message}`;
+        })
+    ),
+    transports: [
+        new winston.transports.Console({
+            format: winston.format.combine(
+                winston.format.colorize(),
+                winston.format.printf(({ timestamp, level, message }) => {
+                    return `${timestamp} [MONITOR-${level}]: ${message}`;
+                })
+            )
+        }),
+        new winston.transports.File({
+            filename: path.join(logDir, 'monitor.log'),
+            maxsize: 5242880, // 5MB
+            maxFiles: 10
+        })
+    ]
+});
+
 module.exports = {
     logger,
-    scheduleLogger
+    scheduleLogger,
+    monitorLogger
 };

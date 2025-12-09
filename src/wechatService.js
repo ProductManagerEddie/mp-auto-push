@@ -120,8 +120,11 @@ class WechatService {
      * @returns {Promise<string>} media_id
      */
     async createDraft(articlesData) {
+        const startTime = Date.now();
+        console.log('正在创建公众号草稿...');
+        console.log('待处理文章数量:', articlesData.length);
+        
         try {
-            console.log('正在创建公众号草稿...');
             const accessToken = await this.getAccessToken();
             
             // 验证文章数据
@@ -129,13 +132,19 @@ class WechatService {
             
             // 处理每篇文章
             const articles = [];
+            const articleResults = [];
+            
             for (const articleItem of articlesData) {
-                const { articleData, lotteryData } = articleItem;
+                const articleStartTime = Date.now();
+                const { articleData, lotteryData, lotteryType } = articleItem;
                 const { title, content, author = '', digest = '' } = articleData;
+                
+                console.log(`处理文章: ${title} (类型: ${lotteryType})`);
                 
                 // 验证并优化标题以符合微信公众号限制
                 console.log(`使用smart模式处理标题: ${title}`);
                 const validatedTitle = this.validateAndTruncateTitle(title, 'smart');
+                console.log(`标题处理完成: ${validatedTitle}`);
                 
                 // 使用已经转换好的HTML格式内容
                 const htmlContent = content;
@@ -145,21 +154,28 @@ class WechatService {
                 if (lotteryData) {
                     // 如果有彩票数据，生成彩票图片
                     try {
+                        console.log('开始生成彩票图片...');
                         const lotteryImagePath = await this.generateLotteryImage(lotteryData);
                         // 将本地图片路径转换为file:// URL
                         const lotteryImageUrl = `file://${lotteryImagePath}`;
+                        console.log('彩票图片生成成功:', lotteryImagePath);
+                        
+                        console.log('开始上传图片到微信...');
                         thumbMediaId = await this.uploadImage(lotteryImageUrl);
                         console.log('使用生成的彩票图片上传成功，media_id:', thumbMediaId);
                     } catch (error) {
-                        console.error('生成彩票图片失败:', error.message);
+                        console.error('生成或上传彩票图片失败:', error.message);
                         // 如果彩票图片生成失败，尝试使用默认图片
                         const defaultImageUrl = 'https://picsum.photos/seed/lottery/800/600.jpg';
                         try {
+                            console.log('尝试使用默认图片...');
                             thumbMediaId = await this.uploadImage(defaultImageUrl);
                             console.log('使用默认图片上传成功，media_id:', thumbMediaId);
                         } catch (defaultError) {
                             console.error('默认图片上传失败:', defaultError.message);
+                            // 如果默认图片上传失败，使用一个空字符串，让微信API使用默认图片
                             thumbMediaId = '';
+                            console.warn('使用空图片media_id，将使用微信默认图片');
                         }
                     }
                 } else {
@@ -167,16 +183,18 @@ class WechatService {
                     // 使用一个公开可访问的图片URL
                     const defaultImageUrl = 'https://picsum.photos/seed/lottery/800/600.jpg';
                     try {
+                        console.log('没有彩票数据，使用默认图片...');
                         thumbMediaId = await this.uploadImage(defaultImageUrl);
                         console.log('使用默认图片上传成功，media_id:', thumbMediaId);
                     } catch (error) {
                         console.error('默认图片上传失败:', error.message);
                         // 如果默认图片上传失败，使用一个空字符串，让微信API使用默认图片
                         thumbMediaId = '';
+                        console.warn('使用空图片media_id，将使用微信默认图片');
                     }
                 }
 
-                articles.push({
+                const article = {
                     title: validatedTitle,
                     author: author,
                     digest: digest || content.substring(0, 100) + '...',
@@ -184,13 +202,27 @@ class WechatService {
                     thumb_media_id: thumbMediaId,
                     need_open_comment: 0,
                     only_fans_can_comment: 0
+                };
+                
+                articles.push(article);
+                
+                const articleEndTime = Date.now();
+                articleResults.push({
+                    title: validatedTitle,
+                    type: lotteryType,
+                    status: 'success',
+                    time: articleEndTime - articleStartTime
                 });
             }
 
+            console.log(`所有${articles.length}篇文章处理完成，开始提交到微信API...`);
+            console.log('文章处理结果:', JSON.stringify(articleResults, null, 2));
+            
             const draftData = {
                 articles: articles
             };
-            console.log('草稿数据:', draftData);
+            console.log('草稿数据提交到微信API:', JSON.stringify(draftData, null, 2));
+            
             const url = `https://api.weixin.qq.com/cgi-bin/draft/add?access_token=${accessToken}`;
             
             const response = await axios.post(url, draftData, {
@@ -200,6 +232,9 @@ class WechatService {
                 timeout: 30000
             });
 
+            const endTime = Date.now();
+            console.log(`微信API调用完成，耗时${endTime - startTime}ms`);
+            
             // 检查微信API响应
             if (response.data.errcode && response.data.errcode !== 0) {
                 console.error('微信API返回错误:', JSON.stringify(response.data));
@@ -214,7 +249,12 @@ class WechatService {
                 throw new Error(`创建草稿失败: 未返回media_id`);
             }
         } catch (error) {
-            console.error('创建草稿失败:', error.message);
+            const endTime = Date.now();
+            console.error(`创建草稿失败，总耗时${endTime - startTime}ms:`, error.message);
+            if (error.response) {
+                console.error('微信API响应详情:', JSON.stringify(error.response.data, null, 2));
+                console.error('微信API响应状态:', error.response.status);
+            }
             throw error;
         }
     }
@@ -912,10 +952,54 @@ class WechatService {
             
             // 设置文字样式
             ctx.fillStyle = '#000000';
-            ctx.font = '32px sans-serif';
+            
+            // 根据彩票数据确定彩票类型和标题
+            let lotteryType = '';
+            let title = '';
+            let numberText1 = '';
+            let numberText2 = '';
+            
+            // 确定彩票类型
+            if (latest.red_balls && latest.red_balls.length > 0) {
+                // 双色球 - 红球+蓝球
+                lotteryType = '双色球';
+                title = `${lotteryType}第${latest.issue}期开奖结果`;
+                numberText1 = `红球: ${latest.red_balls.join(' ')}`;
+                numberText2 = `蓝球: ${latest.blue_balls}`;
+            } else if (latest.balls && latest.balls.length > 0) {
+                // 其他彩票类型
+                if (lotteryData[0].number) {
+                    // 福彩3D
+                    lotteryType = '福彩3D';
+                    title = `${lotteryType}第${latest.issue}期开奖结果`;
+                    numberText1 = `开奖号码: ${latest.number}`;
+                    numberText2 = `数字组合: ${latest.balls.join(' ')}`;
+                } else if (latest.special_ball) {
+                    // 七乐彩 - 普通号码+特别号码
+                    lotteryType = '七乐彩';
+                    title = `${lotteryType}第${latest.issue}期开奖结果`;
+                    numberText1 = `开奖号码: ${latest.balls.join(' ')}`;
+                    numberText2 = `特别号码: ${latest.special_ball}`;
+                } else if (latest.balls.length === 20) {
+                    // 快乐8
+                    lotteryType = '快乐8';
+                    title = `${lotteryType}第${latest.issue}期开奖结果`;
+                    // 只显示前10个号码
+                    const displayBalls = latest.balls.slice(0, 10);
+                    numberText1 = `开奖号码前10位: ${displayBalls.join(' ')}`;
+                    numberText2 = `共${latest.balls.length}个号码`;
+                } else {
+                    // 默认
+                    lotteryType = '彩票';
+                    title = `${lotteryType}第${latest.issue}期开奖结果`;
+                    numberText1 = `开奖号码: ${latest.balls.join(' ')}`;
+                    numberText2 = '';
+                }
+            } else {
+                throw new Error('无效的彩票数据格式');
+            }
             
             // 添加标题
-            const title = `双色球第${latest.issue}期开奖结果`;
             ctx.font = 'bold 36px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(title, width / 2, 70);
@@ -928,13 +1012,11 @@ class WechatService {
             const dateText = `开奖日期: ${latest.draw_date}`;
             ctx.fillText(dateText, 100, 150);
             
-            // 添加红球
-            const redBallsText = `红球: ${latest.red_balls.join(' ')}`;
-            ctx.fillText(redBallsText, 100, 250);
-            
-            // 添加蓝球
-            const blueBallText = `蓝球: ${latest.blue_balls}`;
-            ctx.fillText(blueBallText, 100, 350);
+            // 添加号码信息
+            ctx.fillText(numberText1, 100, 250);
+            if (numberText2) {
+                ctx.fillText(numberText2, 100, 350);
+            }
             
             // 添加奖池信息
             const poolText = `奖池: ${latest.pool_money}元`;
@@ -948,7 +1030,7 @@ class WechatService {
             console.log(`彩票图片已生成: ${imagePath}`);
             return imagePath;
         } catch (error) {
-            console.error('生成彩票图片失败:', error);
+            console.error('生成彩票图片失败:', error.message);
             throw error;
         }
     }

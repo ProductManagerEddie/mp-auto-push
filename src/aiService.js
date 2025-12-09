@@ -18,9 +18,10 @@ class AIService {
      * @returns {Promise<string>} 生成的文章内容
      */
     async generateArticle(lotteryContent, lotteryType = 'ssq') {
+        const startTime = Date.now();
+        console.log(`正在调用智谱AI生成${lotteryType}文章...`);
+        
         try {
-            console.log('正在调用智谱AI生成文章...');
-            
             // 彩票类型映射
             const lotteryTypeNameMap = {
                 'ssq': '双色球',
@@ -70,27 +71,37 @@ ${lotteryContent}`;
                 timeout: 60000
             });
 
-            console.log('智谱AI完整响应:', JSON.stringify(response.data, null, 2));
+            const endTime = Date.now();
+            console.log(`智谱AI调用成功，耗时${endTime - startTime}ms`);
             
             // 智谱AI标准聊天接口响应解析
             if (response.data && response.data.choices && Array.isArray(response.data.choices) && response.data.choices.length > 0) {
                 const firstChoice = response.data.choices[0];
                 if (firstChoice.message && firstChoice.message.content) {
-                    console.log('文章生成成功');
+                    console.log('文章生成成功，内容长度:', firstChoice.message.content.length, '字符');
                     return firstChoice.message.content;
                 }
             }
             
             // 处理错误响应
             const errorMsg = response.data?.error?.message || response.data?.message || 'AI返回数据格式错误';
-            console.error('智谱AI响应错误:', response.data);
+            console.error('智谱AI响应错误:', JSON.stringify(response.data, null, 2));
             throw new Error(`AI返回数据错误: ${errorMsg}`);
         } catch (error) {
-            console.error('生成文章失败:', error.message);
+            const endTime = Date.now();
+            console.error(`生成文章失败，耗时${endTime - startTime}ms:`, error.message);
             if (error.response) {
-                console.error('API响应错误:', error.response.data);
+                console.error('API响应错误详情:', JSON.stringify(error.response.data, null, 2));
+                console.error('API响应状态:', error.response.status);
+                console.error('API响应头:', JSON.stringify(error.response.headers, null, 2));
+            } else if (error.request) {
+                console.error('API请求未收到响应:', error.request);
+            } else {
+                console.error('API请求配置错误:', error.message);
             }
-            throw error;
+            
+            // 抛出详细错误，包含更多上下文信息
+            throw new Error(`智谱AI生成文章失败 [${lotteryType}]: ${error.message}`);
         }
     }
 
@@ -126,21 +137,7 @@ ${lotteryContent}`;
         this.token = apiKey;
     }
 
-    /**
-     * 以下方法为保持向后兼容而保留
-     */
-    setAppId(appId) {
-        console.warn('setAppId方法已废弃，智谱AI标准接口不再需要应用ID');
-        // 不执行任何操作
-    }
 
-    /**
-     * 以下方法为保持向后兼容而保留
-     */
-    setUserId(userId) {
-        console.warn('setUserId方法已废弃，智谱AI标准接口不再需要用户ID');
-        // 不执行任何操作
-    }
 }
 
 module.exports = AIService;

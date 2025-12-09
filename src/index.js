@@ -20,12 +20,6 @@ class AutoPushApp {
         // 配置AI服务（智谱智能体）
         if (process.env.ZHIPU_API_KEY) {
             this.aiService.setToken(process.env.ZHIPU_API_KEY);
-            if (process.env.ZHIPU_APP_ID) {
-                this.aiService.setAppId(process.env.ZHIPU_APP_ID);
-            }
-            if (process.env.ZHIPU_USER_ID) {
-                this.aiService.setUserId(process.env.ZHIPU_USER_ID);
-            }
         } else {
             const message = '错误: 请在.env文件中配置ZHIPU_API_KEY';
             if (this.isServiceMode) {
@@ -124,17 +118,16 @@ class AutoPushApp {
                     // 检查是否有前一天开奖的数据
                     let targetLotteryData = lotteryData.filter(item => item.draw_date === today);
                     
-                    // 如果没有前一天的数据，使用最新的一期数据
+                    // 严格遵循数据优先级规则：只使用前一天的数据
                     if (targetLotteryData.length === 0) {
                         if (lotteryData.length > 0) {
-                            // 使用最新的一期数据
-                            targetLotteryData = [lotteryData[0]];
-                            logInfo(`ℹ️  前一天${lotteryType.name}无开奖信息，使用最新一期数据: ${targetLotteryData[0].draw_date} ${targetLotteryData[0].issue}`);
+                            // 记录日志但不生成文章
+                            logInfo(`ℹ️  前一天${lotteryType.name}无开奖信息，不生成文章`);
                         } else {
                             logInfo(`ℹ️  ${lotteryType.name}无任何开奖信息，跳过处理`);
-                            logInfo(`=== ${lotteryType.name} 处理完成 (无开奖信息) ===`);
-                            continue;
                         }
+                        logInfo(`=== ${lotteryType.name} 处理完成 (无符合条件的数据) ===`);
+                        continue;
                     } else {
                         logInfo(`✅ 找到${targetLotteryData.length}条${lotteryType.name}开奖信息: ${today}`);
                     }
@@ -394,12 +387,10 @@ ${articleData.content}
 
     /**
      * 设置AI服务配置
-     * @param {string} token 元宝AI Token
-     * @param {string} userId 用户ID
+     * @param {string} token 智谱AI Token
      */
-    setAIConfig(token, userId) {
+    setAIConfig(token) {
         if (token) this.aiService.setToken(token);
-        if (userId) this.aiService.setUserId(userId);
     }
 
     /**

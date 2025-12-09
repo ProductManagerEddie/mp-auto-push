@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const { scheduleLogger } = require('./logger');
 const AutoPushApp = require('./index');
+const { getMonitor } = require('./monitor');
 
 /**
  * 定时任务调度器
@@ -24,16 +25,16 @@ class Scheduler {
 
         scheduleLogger.info('启动定时任务调度器');
         
-        // 每天8:30执行彩票数据预加载任务
-        const preloadTask = cron.schedule('30 8 * * *', async () => {
-            await this.executePreloadTask();
+        // 每天10:00执行彩票数据爬取任务
+        const crawlTask = cron.schedule('0 10 * * *', async () => {
+            await this.executeCrawlTask();
         }, {
             scheduled: false,
             timezone: process.env.TIMEZONE || 'Asia/Shanghai'
         });
 
-        // 每天9点执行推送任务
-        const dailyTask = cron.schedule('0 9 * * *', async () => {
+        // 每天10:30执行推送任务
+        const dailyTask = cron.schedule('30 10 * * *', async () => {
             await this.executePushTask();
         }, {
             scheduled: false,
@@ -61,7 +62,7 @@ class Scheduler {
         });
 
         // 启动任务
-        preloadTask.start();
+        crawlTask.start();
         dailyTask.start();
         healthCheckTask.start();
         
@@ -71,15 +72,15 @@ class Scheduler {
             scheduleLogger.info('测试任务已启动（开发模式）');
         }
 
-        this.tasks.set('preload', preloadTask);
+        this.tasks.set('crawl', crawlTask);
         this.tasks.set('daily', dailyTask);
         this.tasks.set('health', healthCheckTask);
         
         this.isRunning = true;
         
         scheduleLogger.info('定时任务已启动:');
-        scheduleLogger.info('- 彩票数据预加载: 每天8:30');
-        scheduleLogger.info('- 每日推送: 每天9:00');
+        scheduleLogger.info('- 彩票数据爬取: 每天10:00');
+        scheduleLogger.info('- 每日推送: 每天10:30');
         scheduleLogger.info('- 健康检查: 每小时');
         if (process.env.NODE_ENV === 'development') {
             scheduleLogger.info('- 测试任务: 每分钟（开发模式）');
@@ -109,10 +110,10 @@ class Scheduler {
     }
 
     /**
-     * 执行彩票数据预加载任务
+     * 执行彩票数据爬取任务
      */
-    async executePreloadTask() {
-        scheduleLogger.info('开始执行彩票数据预加载任务');
+    async executeCrawlTask() {
+        scheduleLogger.info('开始执行彩票数据爬取任务');
         
         try {
             // 支持的彩票类型
@@ -124,26 +125,78 @@ class Scheduler {
                 '3d': '福彩3D'
             };
             
-            scheduleLogger.info(`预加载以下彩票类型数据: ${lotteryTypes.map(type => lotteryTypeNameMap[type]).join(', ')}`);
+            scheduleLogger.info(`爬取以下彩票类型数据: ${lotteryTypes.map(type => lotteryTypeNameMap[type]).join(', ')}`);
             
-            // 预加载每种彩票类型的数据
+            // 记录爬取结果
+            const crawlResults = {
+                success: 0,
+                failed: 0,
+                details: {}
+            };
+            
+            // 爬取每种彩票类型的数据
             for (const type of lotteryTypes) {
-                scheduleLogger.info(`预加载${lotteryTypeNameMap[type]}数据...`);
+                scheduleLogger.info(`爬取${lotteryTypeNameMap[type]}数据...`);
                 
                 try {
-                    const lotteryData = await this.app.lotteryService.getLatestLotteryData(type);
-                    scheduleLogger.info(`成功预加载${lotteryTypeNameMap[type]}数据，共${lotteryData.length}条记录`);
+                    // 调用彩票服务的爬取方法
+                    const lotteryData = await this.app.lotteryService.getLatestLotteryData(type, 10);
+                    
+                    // 数据验证
+                    if (lotteryData && lotteryData.length > 0) {
+                        scheduleLogger.info(`成功爬取${lotteryTypeNameMap[type]}数据，共${lotteryData.length}条记录`);
+                        crawlResults.success++;
+                        crawlResults.details[type] = {
+                            status: 'success',
+                            count: lotteryData.length,
+                            latestIssue: lotteryData[0].issue,
+                            latestDate: lotteryData[0].draw_date
+                        };
+                    } else {
+                        scheduleLogger.warn(`${lotteryTypeNameMap[type]}数据为空或无效`);
+                        crawlResults.failed++;
+                        crawlResults.details[type] = {
+                            status: 'empty',
+                            count: 0
+                        };
+                    }
                 } catch (error) {
-                    scheduleLogger.error(`预加载${lotteryTypeNameMap[type]}数据失败:`, error.message);
+                    scheduleLogger.error(`爬取${lotteryTypeNameMap[type]}数据失败:`, error.message);
+                    crawlResults.failed++;
+                    crawlResults.details[type] = {
+                        status: 'error',
+                        message: error.message
+                    };
                 }
             }
             
-            scheduleLogger.info('彩票数据预加载任务执行完成');
-            return true;
+            // 记录完整的爬取结果
+            scheduleLogger.info('彩票数据爬取任务执行完成', crawlResults);
+            
+            // 更新监控状态
+            const monitor = getMonitor();
+            monitor.updateCrawlStatus(crawlResults);
+            
+            // 如果有失败，发送告警
+            if (crawlResults.failed > 0) {
+                scheduleLogger.error('部分彩票数据爬取失败，需要检查', {
+                    failedCount: crawlResults.failed,
+                    successCount: crawlResults.success,
+                    totalCount: lotteryTypes.length
+                });
+            }
+            
+            return crawlResults;
             
         } catch (error) {
-            scheduleLogger.error('彩票数据预加载任务异常:', error);
-            return false;
+            scheduleLogger.error('彩票数据爬取任务异常:', error);
+            return {
+                success: 0,
+                failed: 4,
+                details: {
+                    error: error.message
+                }
+            };
         }
     }
     
@@ -155,6 +208,10 @@ class Scheduler {
         
         try {
             const result = await this.app.run();
+            
+            // 更新监控状态
+            const monitor = getMonitor();
+            monitor.updatePushStatus(result);
             
             if (result.success) {
                 scheduleLogger.info('定时推送任务执行成功', {
