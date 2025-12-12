@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 require('dotenv').config();
-const Scheduler = require('./scheduler');
-const { logger } = require('./logger');
+const Scheduler = require('../scheduler/scheduler');
+const { logger } = require('../utils/logger');
 
 /**
  * 后台服务守护进程

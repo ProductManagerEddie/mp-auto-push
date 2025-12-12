@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'mp-auto-push',
-    script: 'src/daemon.js',
+    script: 'src/server/daemon.js',
     args: 'start',
     instances: 1,
     autorestart: true,

@@ -1,9 +1,9 @@
 require('dotenv').config();
 
-const LotteryService = require('./lotteryService');
-const AIService = require('./aiService');
-const WeChatService = require('./wechatService');
-const { logger } = require('./logger');
+const LotteryService = require('./services/lotteryService');
+const AIService = require('./services/aiService');
+const WeChatService = require('./services/wechatService');
+const { logger } = require('./utils/logger');
 const fs = require('fs').promises;
 const path = require('path');
 

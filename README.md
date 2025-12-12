@@ -4,14 +4,14 @@
 
 ## 功能特性
 
-- 🔄 **自动获取彩票数据**: 从指定的彩票服务获取最新开奖信息，支持双色球、快乐8、七乐彩、福彩3D
+- 🔄 **自动获取彩票数据**: 从官方彩票网站爬取最新开奖信息，支持双色球、快乐8、七乐彩、福彩3D
 - 🤖 **AI文章生成**: 使用智谱AI将彩票数据转换为适合公众号的规范文章格式
 - 📝 **统一标题格式**: 自动生成标准化标题：【彩票类型】开奖结果第【开奖期号】期中奖号码
 - 📱 **微信推送**: 自动将生成的文章推送到微信公众号草稿箱
 - 💾 **本地备份**: 支持将文章保存到本地文件（当微信配置缺失时）
-- ⏰ **定时任务**: 支持每天自动执行推送任务
+- ⏰ **定时任务**: 支持每天自动执行推送任务，爬取时间10:20，推送时间10:30
 - 🔧 **后台服务**: 支持后台守护进程运行，提供服务管理功能
-- 🌐 **手动触发API**: 提供RESTful API接口，支持手动触发推送任务
+- 🌐 **RESTful API**: 提供API接口，支持手动触发推送任务和获取彩票数据
 - 📊 **推送历史记录**: 记录所有推送任务的执行情况
 - 📋 **日志记录**: 完整的日志记录系统，支持不同级别的日志输出
 - 🚀 **进程管理**: 支持PM2进程管理，提供进程监控和自动重启
@@ -21,6 +21,8 @@
 - 📏 **动态文章数量**: 根据当天开奖情况生成对应数量的文章，不强行要求4篇
 - 🎨 **统一排版样式**: 所有彩票类型文章使用统一的排版格式
 - 🎯 **AI提示词优化**: 针对不同彩票类型生成定制化提示词，确保内容准确性
+- 📊 **数据库管理**: SQLite数据库存储，支持数据备份和清理
+- 🐍 **Python爬虫服务**: 独立的Python爬虫服务，负责彩票数据的定期爬取
 
 ## 工作流程
 
@@ -72,6 +74,8 @@ mkdir -p logs output images
 
 ### 运行方式
 
+### Node.js服务运行
+
 #### 单次执行
 ```bash
 # 执行一次推送
@@ -82,6 +86,40 @@ npm run help
 
 # 查看配置说明
 npm run config
+```
+
+### Python爬虫服务运行
+
+#### 安装依赖
+```bash
+cd python-service/backend
+pip install -r requirements.txt
+```
+
+#### 启动Python服务
+```bash
+# 启动Flask API服务器
+python app.py
+
+# 启动爬虫定时任务
+python scheduler.py
+
+# 执行一次爬虫
+python -c "from crawler.crawler import LotteryCrawler; crawler = LotteryCrawler(); crawler.crawl_all_lottery_data()"
+
+# 强制执行爬虫（忽略今日已爬取记录）
+python -c "from crawler.crawler import LotteryCrawler; crawler = LotteryCrawler(); crawler.crawl_all_lottery_data(force=True)"
+```
+
+### 完整服务启动
+
+```bash
+# 启动Node.js守护进程
+npm run daemon:start
+
+# 启动Python服务（后台运行）
+cd python-service/backend
+gunicorn -w 4 -b 0.0.0.0:5000 app:app --daemon
 ```
 
 ## 配置说明
@@ -102,6 +140,17 @@ WECHAT_APP_SECRET=your_wechat_app_secret
 # 彩票API配置 (可选)
 LOTTERY_API_URL=http://localhost:5000
 LOTTERY_API_TIMEOUT=10000
+
+# 定时任务配置
+TIMEZONE=Asia/Shanghai
+
+# 推送配置
+AUTO_PUBLISH=false
+PUSH_TEMPLATE=standard
+
+# 监控配置
+MONITOR_ENABLED=true
+MONITOR_INTERVAL=60
 ```
 
 ### 智谱AI配置
@@ -229,36 +278,46 @@ npm run dev
 
 ```
 mp-auto-push/
-├── src/
-│   ├── index.js           # 主程序入口
-│   ├── lotteryService.js  # 彩票数据获取服务
-│   ├── aiService.js       # AI文章生成服务
-│   ├── wechatService.js   # 微信公众号服务
-│   ├── logger.js          # 日志记录模块
-│   ├── scheduler.js       # 定时任务调度模块
-│   ├── monitor.js         # 监控模块
-│   ├── daemon.js          # 守护进程模块
-│   ├── server.js          # HTTP服务器模块
-│   ├── httpServer.js      # HTTP服务器实现
-├── images/                # 彩票图片生成目录
-├── logs/                  # 日志文件目录
-│   ├── app.log           # 应用日志
-│   ├── error.log         # 错误日志
-│   ├── schedule.log      # 调度日志
-│   └── pm2-*.log         # PM2日志
-├── output/                # 本地文章输出目录
-│   └── 2025/              # 按年月分类的文章目录
-│       └── 12/            # 具体月份的文章目录
-├── history/               # 推送历史记录目录
-├── scripts/               # 服务脚本目录
-├── shuangseqiu/           # 双色球数据服务目录
-├── test_draft_creation.js # 草稿创建功能测试
-├── test_date_matching.js  # 日期匹配功能测试
-├── .env.example           # 环境变量配置示例
-├── .gitignore            # Git忽略文件
-├── package.json          # 项目配置
-├── ecosystem.config.js   # PM2配置文件
-└── README.md            # 项目说明
+├── src/                      # 主应用代码目录
+│   ├── index.js              # 主程序入口
+│   ├── scheduler/            # 定时任务调度模块
+│   │   └── scheduler.js      # 调度器实现
+│   ├── server/               # 服务器相关模块
+│   │   ├── daemon.js         # 守护进程实现
+│   │   ├── httpServer.js     # HTTP服务器实现
+│   │   └── server.js         # 服务器启动入口
+│   ├── services/             # 核心服务模块
+│   │   ├── aiService.js      # AI文章生成服务
+│   │   ├── lotteryService.js # 彩票数据获取服务
+│   │   └── wechatService.js  # 微信公众号服务
+│   ├── utils/                # 工具类模块
+│   │   ├── logger.js         # 日志记录模块
+│   │   ├── monitor.js        # 监控模块
+│   │   └── pushHistory.js    # 推送历史记录管理
+│   └── images/               # 生成的彩票图片目录
+├── python-service/           # Python爬虫服务目录
+│   └── backend/              # Python服务后端
+│       ├── api/              # API接口模块
+│       ├── backups/          # 数据库备份目录
+│       ├── config/           # 配置文件目录
+│       ├── crawler/          # 爬虫实现模块
+│       ├── models/           # 数据库模型模块
+│       ├── app.py            # Flask应用入口
+│       ├── lottery.db        # SQLite数据库文件
+│       ├── requirements.txt  # Python依赖列表
+│       └── scheduler.py      # Python定时任务
+├── images/                   # 彩票图片存储目录
+├── history/                  # 推送历史记录目录
+│   └── push_history.json     # 推送历史数据
+├── scripts/                  # 服务脚本目录
+│   ├── install.sh            # 安装脚本
+│   └── service.sh            # 服务管理脚本
+├── .env.example              # 环境变量配置示例
+├── .gitignore               # Git忽略文件
+├── package.json             # Node.js项目配置
+├── package-lock.json        # 依赖锁定文件
+├── ecosystem.config.js      # PM2配置文件
+└── README.md               # 项目说明文档
 ```
 
 ## 日志管理
@@ -371,6 +430,20 @@ MIT License
 欢迎提交Issue和Pull Request来改进这个项目。
 
 ## 更新日志
+
+### v1.3.0
+- 🔄 项目结构重构：模块化设计，清晰的目录结构
+- 🐍 新增独立Python爬虫服务，负责彩票数据定期爬取
+- 📊 统一数据库路径，确保Node.js和Python服务使用同一数据库
+- ⏰ 调整定时任务：爬取时间10:20，推送时间10:30
+- 🔧 优化爬取逻辑，添加force参数支持强制爬取
+- 🔧 修复can_crawl_today函数，只检查成功的爬取记录
+- ✨ 支持多种彩票类型的同时爬取和推送
+- 📄 更新README文档，添加Python服务说明和项目结构
+- 🔧 修复API 404错误，优化路由配置
+- 🔧 删除冗余文件，保持代码整洁
+- ✨ 实现数据库备份和清理功能
+- 📱 支持自动生成彩票图片并上传到微信
 
 ### v1.2.0
 - 🔄 AI服务切换：从元宝AI切换到智谱AI

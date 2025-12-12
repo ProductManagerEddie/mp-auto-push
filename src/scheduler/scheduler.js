@@ -1,7 +1,7 @@
 const cron = require('node-cron');
-const { scheduleLogger } = require('./logger');
-const AutoPushApp = require('./index');
-const { getMonitor } = require('./monitor');
+const { scheduleLogger } = require('../utils/logger');
+const AutoPushApp = require('../index');
+const { getMonitor } = require('../utils/monitor');
 
 /**
  * 定时任务调度器
@@ -25,8 +25,8 @@ class Scheduler {
 
         scheduleLogger.info('启动定时任务调度器');
         
-        // 每天10:00执行彩票数据爬取任务
-        const crawlTask = cron.schedule('0 10 * * *', async () => {
+        // 每天10:20执行彩票数据爬取任务
+        const crawlTask = cron.schedule('20 10 * * *', async () => {
             await this.executeCrawlTask();
         }, {
             scheduled: false,
@@ -79,7 +79,7 @@ class Scheduler {
         this.isRunning = true;
         
         scheduleLogger.info('定时任务已启动:');
-        scheduleLogger.info('- 彩票数据爬取: 每天10:00');
+        scheduleLogger.info('- 彩票数据爬取: 每天10:20');
         scheduleLogger.info('- 每日推送: 每天10:30');
         scheduleLogger.info('- 健康检查: 每小时');
         if (process.env.NODE_ENV === 'development') {

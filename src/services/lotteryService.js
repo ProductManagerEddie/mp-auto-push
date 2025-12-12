@@ -1,13 +1,12 @@
-const axios = require('axios');
+const sqlite3 = require('sqlite3').verbose();
 
 /**
  * 彩票数据服务
  */
 class LotteryService {
     constructor() {
-        // 默认使用本地彩票API，可通过环境变量配置
-        this.apiUrl = process.env.LOTTERY_API_URL || 'http://localhost:5000';
-        this.timeout = parseInt(process.env.LOTTERY_API_TIMEOUT) || 10000;
+        // 数据库文件路径，与Python后端保持一致
+        this.dbPath = '/Users/eddie/工作空间/05workspace/01project/04mp_auto_push_caipiao/mp-auto-push/python-service/backend/lottery.db';
     }
 
     /**
@@ -20,22 +19,80 @@ class LotteryService {
         try {
             console.log(`正在获取${type}彩票数据...`);
             
-            const response = await axios.get(`${this.apiUrl}/api/lottery/${type}/latest`, {
-                params: { limit },
-                timeout: this.timeout
+            // 使用Promise包装sqlite3查询
+            const lotteryData = await new Promise((resolve, reject) => {
+                const db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READONLY, (err) => {
+                    if (err) {
+                        return reject(new Error(`数据库连接失败: ${err.message}`));
+                    }
+                });
+
+                // 查询彩票类型ID
+                db.get('SELECT id FROM lottery_type WHERE code = ?', [type], (err, typeRow) => {
+                    if (err) {
+                        db.close();
+                        return reject(new Error(`查询彩票类型失败: ${err.message}`));
+                    }
+
+                    if (!typeRow) {
+                        db.close();
+                        return reject(new Error(`未找到彩票类型: ${type}`));
+                    }
+
+                    const typeId = typeRow.id;
+
+                    // 查询最新的彩票结果
+                    const query = `
+                        SELECT * FROM lottery_result 
+                        WHERE type_id = ? 
+                        ORDER BY draw_date DESC, issue DESC 
+                        LIMIT ?
+                    `;
+
+                    db.all(query, [typeId, limit], (err, rows) => {
+                        db.close();
+
+                        if (err) {
+                            return reject(new Error(`查询彩票数据失败: ${err.message}`));
+                        }
+
+                        // 处理查询结果，将逗号分隔的字符串转换为数组
+                        const result = rows.map(row => {
+                            const processedRow = {
+                                ...row,
+                                red_balls: row.red_balls ? row.red_balls.split(',').map(ball => ball.trim()) : [],
+                                blue_balls: row.blue_balls ? [row.blue_balls.trim()] : null
+                            };
+
+                            // 福彩3D特殊处理
+                            if (type === '3d') {
+                                processedRow.balls = processedRow.red_balls;
+                                processedRow.number = processedRow.red_balls.join('');
+                            }
+                            // 七乐彩特殊处理
+                            else if (type === 'qlc' && processedRow.blue_balls) {
+                                processedRow.special_ball = processedRow.blue_balls[0];
+                                processedRow.balls = processedRow.red_balls;
+                            }
+                            // 快乐8特殊处理
+                            else if (type === 'kl8') {
+                                processedRow.balls = processedRow.red_balls;
+                            }
+
+                            return processedRow;
+                        });
+
+                        resolve(result);
+                    });
+                });
             });
 
-            if (response.data && response.data.success && response.data.data) {
-                const lotteryData = response.data.data;
-                console.log(`成功获取${lotteryData.length}条${type}彩票数据`);
-                
-                // 数据校验：确保关键字段存在且为真实值
-                this.validateLotteryData(lotteryData);
-                
-                return lotteryData;
-            } else {
-                throw new Error('彩票API返回数据格式错误');
-            }
+            console.log(`成功获取${lotteryData.length}条${type}彩票数据`);
+            
+            // 数据校验：确保关键字段存在且为真实值
+            this.validateLotteryData(lotteryData);
+            
+            return lotteryData;
         } catch (error) {
             console.error('获取彩票数据失败:', error.message);
             // 不使用模拟数据，直接抛出错误
